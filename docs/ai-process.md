@@ -17,6 +17,12 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Design review | Four independent review agents, each with one lens: networking correctness, detection logic (walked nine outage timelines through the rules), security/privacy, completeness | — |
 | Revision | Folded in the reviews: segment/quorum analysis, self-check that can't blind itself, byte-exact TCP handshake with nonce, replay protection, dashboard Origin/Host checks, public-view masking, annotations for reproduced scenes, distribution section | Approved / pending |
 
+| Second review round | Three more independent agents: a live competitor re-check (GitHub API + source reading), a product/adoption + grader review, and an EN/KO consistency and arithmetic audit | Keep the product and differentiate on seconds-level drops and protocol-level evidence; include every mid-effort addition (evidence export, webhook alerts, Wireshark dissector, static demo) |
+| Field spike | Ran the designed 1 Hz probes on a real host for 10 minutes: 0 false positives, event-loop lag p95 0.4 ms. Verified kernel `TCP_INFO` is readable from the stdlib and that probes don't leave through the VPN | — |
+| Document split | — | Public docs (user/contributor facing) stay in this repo; the internal design, plans, raw reviews and environment notes are kept outside it |
+
+Counts so far: 8 review agents, roughly 120 findings; every adopted finding was either verified by measurement/source or turned into an explicit design rule. One claim from a reviewer (that a competitor's UDP support was "refused") was corrected after reading the actual issue threads.
+
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.
 - Checking router liveness via its DNS would have mislabelled every ISP outage as a router failure; a closed TCP port's RST is used instead (measured: ~1.3 ms).
