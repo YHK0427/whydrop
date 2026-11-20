@@ -64,3 +64,7 @@ def test_report_card_shape_and_privacy():
     assert "100.64.3.4" not in str(card) and card["ipv6_unmeasured"] is True
     assert google_verdict(["74.125.18.7"]) == "ok" and google_verdict(["198.51.100.9"]) == "suspect"
     assert google_verdict([]) == "unknown"
+
+
+def test_chaos_numbered_site_is_ok():  # Cloudflare's real answer, measured 2026-11-20
+    assert env.chaos_verdict(["icn06"]) == "ok"

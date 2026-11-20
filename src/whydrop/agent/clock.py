@@ -31,6 +31,13 @@ class TimeBase:
     def _anchor(self, w: float, m: float) -> None:
         self._anchor_wall, self._anchor_mono = w, m
 
+    def rebase(self) -> None:
+        """Forget the gap since the last check (call right before ticking starts, so startup work isn't
+        mistaken for a suspend)."""
+        self._last_wall, self._last_mono = self._wall(), self._mono()
+        if self._boot:
+            self._last_gap = self._boot() - self._last_mono
+
     def now_ms(self) -> int:
         return int((self._anchor_wall + self._mono() - self._anchor_mono) * 1000)
 

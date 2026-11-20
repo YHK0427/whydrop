@@ -75,11 +75,11 @@ def has_ipv6_default(text: str) -> bool:
 
 
 def chaos_verdict(strings: list[str]) -> Literal["ok", "suspect", "unknown"]:
-    """Cloudflare answers CHAOS id.server with its site's airport code (e.g. ICN); anything else means a
-    middlebox answered for it."""
+    """Cloudflare answers CHAOS id.server with its site: an airport code, optionally numbered (measured
+    2026-11-20: "icn06"). Anything else means a middlebox answered for it."""
     if not strings:
         return "unknown"
-    return "ok" if any(re.fullmatch(r"[A-Z]{3}", s.strip()) for s in strings) else "suspect"
+    return "ok" if any(re.fullmatch(r"[A-Za-z]{3}\d*", s.strip()) for s in strings) else "suspect"
 
 
 async def _egress_iface() -> str | None:

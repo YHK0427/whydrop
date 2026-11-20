@@ -116,3 +116,12 @@ def test_slew_never_reports_a_step():
         f.wall += 1 - 500e-6
         assert t.check() == []
     assert abs(t.now_ms() - f.wall * 1000) < 1000  # timestamps still follow wall time
+
+
+def test_rebase_hides_startup_gap_on_windows():
+    f = Fake()
+    t = tb(f, platform="win32")
+    f.advance(12)  # self-check took 12 s before the first tick
+    t.rebase()
+    f.advance(1)
+    assert t.check() == []
