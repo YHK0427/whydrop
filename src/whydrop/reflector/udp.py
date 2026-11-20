@@ -65,13 +65,15 @@ class UdpReflector:
         if p.type == WdType.NAT_REQ:
             if p.arg not in NAT_DELAYS_S:
                 return self._drop("nat_delay")
-            if p.session_id not in self._pending and self._nat_full(ip):
+            owner = self._pending.get(p.session_id)
+            if (owner is None or owner.addr[0] != ip) and self._nat_full(ip):  # taking over a slot counts against the new IP
                 return self._drop("nat_cap")
         s = self._session(p.session_id)
         if not s.window.accept(p.seq):
             return self._drop("replay")
         now = self._clock()
         s.last_seen = now
+        self.sessions.move_to_end(p.session_id)
         self._tomb.update(p.session_id, s.window.highest)
         if p.type == WdType.PROBE:
             s.recv_count += 1
@@ -98,11 +100,9 @@ class UdpReflector:
         s = self.sessions.get(sid)
         if s is None:
             floor = self._tomb.get(sid)
-            s = self.sessions[sid] = Session(ReplayWindow(-1 if floor is None else floor))
+            s = self.sessions[sid] = Session(ReplayWindow(-1 if floor is None else floor), last_seen=self._clock())
             if len(self.sessions) > self._max_sessions:
                 self.sessions.popitem(last=False)
-        else:
-            self.sessions.move_to_end(sid)
         return s
 
     def _nat_full(self, ip: str) -> bool:

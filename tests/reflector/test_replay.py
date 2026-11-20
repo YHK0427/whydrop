@@ -114,3 +114,12 @@ def test_no_path_is_memory_only():
     t.update(1, 5)
     t.flush()
     assert t.get(1) == 5
+
+
+@pytest.mark.parametrize("content", ['{"v": 1, "t": []}', '{"v": 1, "t": {"1": [4, Infinity]}}'])
+def test_odd_files_are_handled(tmp_path, content):
+    p = tmp_path / "t.json"
+    p.write_text(content)
+    t = Tombstones(p)
+    t.load()
+    assert t.get(1) is None

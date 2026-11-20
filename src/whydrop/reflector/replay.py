@@ -1,6 +1,7 @@
 """Per-session replay window and the tombstones that keep it closed across restarts (spec §5.4, §5.5)."""
 import json
 import logging
+import math
 import os
 import time
 from pathlib import Path
@@ -65,8 +66,8 @@ class Tombstones:
             return
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
-            self._t = {int(k): [int(v[0]), float(v[1])] for k, v in raw["t"].items()}
-        except (ValueError, KeyError, TypeError, IndexError) as e:
+            self._t = {int(k): [int(v[0]), float(v[1])] for k, v in raw["t"].items() if math.isfinite(float(v[1]))}
+        except (ValueError, KeyError, TypeError, IndexError, AttributeError) as e:
             log.warning("tombstone file %s unreadable (%s); starting empty, replays inside the gap may be answered once", self._path, e)
             self._t = {}
         self._prune()
@@ -76,7 +77,10 @@ class Tombstones:
         if self._path is None:
             return
         tmp = self._path.with_name(self._path.name + ".tmp")
-        tmp.write_text(json.dumps({"v": 1, "t": {str(k): v for k, v in self._t.items()}}), encoding="utf-8")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"v": 1, "t": {str(k): v for k, v in self._t.items()}}, f)
+            f.flush()
+            os.fsync(f.fileno())  # survive power loss: never replace with an empty file
         os.replace(tmp, self._path)
 
     def _prune(self) -> None:

@@ -165,3 +165,47 @@ def test_tombstone_floor_on_new_instance(tmp_path):
     assert r2.handle(probe(7, 5), A) == []
     [e] = r2.handle(probe(7, 6), A)
     assert decode(e, S).epoch == 2
+
+
+def test_rejected_nat_leaves_no_session():
+    r = mk()
+    r.handle(natreq(1, 1, 11), A)
+    for sid in range(2, 19):  # 17 requests: sids 2..17 fill the per-IP cap of 16, sid 18 is refused
+        r.handle(natreq(sid, 1, 600), A)
+    assert r.drops["nat_cap"] == 1 and 1 not in r.sessions and 18 not in r.sessions
+
+
+def test_duplicate_nat_req_does_not_restart_delay():
+    r, clk = mk_clock()
+    r.handle(natreq(1, 1, 10), A)
+    clk.t += 5
+    assert r.handle(natreq(1, 1, 10), A) == [] and r.drops["replay"] == 1
+    clk.t += 5.1
+    assert len(r.due()) == 1
+
+
+def test_nat_total_cap():
+    r = mk()
+    for ip in range(64):
+        for sid in range(16):
+            r.handle(natreq(ip * 100 + sid, 1, 600), (f"198.51.100.{ip}", 1))
+    assert r.drops["nat_cap"] == 0
+    assert r.handle(natreq(99999, 1, 600), ("203.0.113.1", 1)) == [] and r.drops["nat_cap"] == 1
+
+
+def test_nat_takeover_counts_against_new_ip():
+    r = mk()
+    B = ("192.0.2.20", 1)
+    for sid in range(16):
+        r.handle(natreq(sid, 1, 600), B)
+    r.handle(natreq(500, 1, 600), A)
+    assert r.handle(natreq(500, 2, 600), B) == [] and r.drops["nat_cap"] == 1
+
+
+def test_evicted_session_keeps_replay_floor():
+    t = Tombstones(None)
+    r = UdpReflector(S, epoch=1, tombstones=t, clock=Clock(), max_sessions=1)
+    r.handle(probe(1, 5), A)
+    r.handle(probe(2, 1), A)
+    assert 1 not in r.sessions
+    assert r.handle(probe(1, 5), A) == [] and len(r.handle(probe(1, 6), A)) == 1
