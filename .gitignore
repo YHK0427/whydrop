@@ -6,3 +6,7 @@ whydrop.toml
 __pycache__/
 .venv/
 dist/
+.superpowers/
+.pytest_cache/
+whydrop-state/
+whydrop-data/
