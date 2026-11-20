@@ -50,8 +50,8 @@ class TcpReflector:
         return len(self._single) + sum(len(s) for s in self._nat.values())
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        ip = writer.get_extra_info("peername")[0]
         try:
+            ip = (writer.get_extra_info("peername") or ("?",))[0]
             if self._unauth[ip] >= UNAUTH_PER_IP or self._unauth_total >= UNAUTH_TOTAL:
                 self.drops["unauth_cap"] += 1
                 return
@@ -72,6 +72,8 @@ class TcpReflector:
                 self._unregister(hello, writer)
         except (ConnectionError, asyncio.IncompleteReadError, asyncio.TimeoutError, OSError, WtError):
             pass
+        except Exception:  # never let one connection's bug reach asyncio's default handler silently
+            log.exception("tcp handler failed")
         finally:
             writer.close()
 
@@ -108,10 +110,10 @@ class TcpReflector:
 
     def _register(self, h: Hello, writer) -> bool:
         if h.role == Role.NAT:
-            conns = self._nat.setdefault(h.session_id, set())
+            conns = self._nat.get(h.session_id, set())
             if len(conns) >= NAT_PER_SESSION or self._auth_total >= AUTH_TOTAL:
                 return False
-            conns.add(writer)
+            self._nat[h.session_id] = conns | {writer}
             return True
         key = (h.session_id, h.role)
         old = self._single.get(key)
@@ -124,17 +126,24 @@ class TcpReflector:
 
     def _unregister(self, h: Hello, writer) -> None:
         if h.role == Role.NAT:
-            conns = self._nat.get(h.session_id, set())
-            conns.discard(writer)
-            if not conns:
+            conns = self._nat.get(h.session_id, set()) - {writer}
+            if conns:
+                self._nat[h.session_id] = conns
+            else:
                 self._nat.pop(h.session_id, None)
         elif self._single.get((h.session_id, h.role)) is writer:
             del self._single[(h.session_id, h.role)]
 
     async def _hot(self, h: Hello, reader, writer) -> None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._hot_idle_close  # only HBs extend it (spec: "no HB for 30 s")
         while True:
-            f = decode_frame(await asyncio.wait_for(reader.readexactly(FRAME_LEN), self._hot_idle_close))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            f = decode_frame(await asyncio.wait_for(reader.readexactly(FRAME_LEN), remaining))
             if f.type == FrameType.HB:
+                deadline = loop.time() + self._hot_idle_close
                 writer.write(encode_frame(Frame(FrameType.HB_ACK, 0, f.seq, f.t_send_ns)))
                 await writer.drain()
 

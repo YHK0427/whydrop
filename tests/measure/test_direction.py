@@ -40,3 +40,8 @@ def test_totals_all_up_lost():
 
 def test_totals_no_gap():
     assert outage_totals(Echo(1, 1, 1, 0), Echo(2, 2, 1, 0), 1) == OutageTotals(0, 0, "ok")
+
+
+def test_totals_inconsistent_counters_unknown():
+    assert outage_totals(Echo(1, 1, 1, 0), Echo(9, 1, 1, 0), 0).status == "unknown"   # b not counted
+    assert outage_totals(Echo(1, 1, 1, 0), Echo(9, 4, 1, 0), 5).status == "unknown"   # more echoes than arrivals

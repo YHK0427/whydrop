@@ -183,3 +183,39 @@ def test_nat_cap_busy():
             wr.close()
         srv.close()
     run(main())
+
+
+def test_busy_at_total_cap_leaves_no_state(monkeypatch):
+    import whydrop.reflector.tcp as tcp
+
+    async def forever(d):
+        await asyncio.Event().wait()
+
+    async def main():
+        monkeypatch.setattr(tcp, "AUTH_TOTAL", 1)
+        r, srv, port = await _server(sleep=forever)
+        rd1, wr1 = await _hello(port, role=Role.NAT, sid=1, param=60)
+        await rd1.readexactly(16)
+        for sid in range(2, 6):
+            rd, _ = await _hello(port, role=Role.NAT, sid=sid, param=60)
+            assert decode_short(await rd.readexactly(4)) == WtType.BUSY
+        assert set(r._nat) == {1}
+        wr1.close(); srv.close()
+    run(main())
+
+
+def test_hot_junk_frames_do_not_hold_slot():
+    async def main():
+        r, srv, port = await _server(hot_idle_close_s=0.3)
+        rd, wr = await _hello(port)
+        await rd.readexactly(16)
+        try:
+            for _ in range(6):  # IDLE_PONG frames on a hot connection are not heartbeats
+                wr.write(encode_frame(Frame(FrameType.IDLE_PONG, 0, 1, 1)))
+                await wr.drain()
+                await asyncio.sleep(0.1)
+        except ConnectionError:
+            pass  # the reflector already closed us, which is the point
+        assert await _closed(rd)
+        srv.close()
+    run(main())

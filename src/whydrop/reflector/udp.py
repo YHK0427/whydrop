@@ -1,5 +1,6 @@
 """UDP side of the reflector: ECHO for PROBEs, immediate + delayed replies for NAT_REQ (spec §5.3–5.5)."""
 import asyncio
+import logging
 import socket
 import sys
 import time
@@ -10,6 +11,8 @@ from whydrop.proto import wd
 from whydrop.proto.wd import NAT_DELAYS_S, WdError, WdPacket, WdType
 from whydrop.reflector.limits import PerKeyBuckets
 from whydrop.reflector.replay import ReplayWindow, Tombstones
+
+log = logging.getLogger(__name__)
 
 SESSION_IDLE_S = 24 * 3600
 NAT_PENDING_PER_IP = 16
@@ -164,7 +167,10 @@ class UdpServer:
 async def _every(interval: float, fn) -> None:
     while True:
         await asyncio.sleep(interval)
-        fn()
+        try:
+            fn()
+        except Exception:  # keep the timer alive; one bad tick must not stop delayed NAT replies
+            log.exception("periodic %s failed", getattr(fn, "__name__", fn))
 
 
 async def serve_udp(r: UdpReflector, host: str, port: int) -> UdpServer:
