@@ -29,7 +29,15 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | References | Opened similar products in a browser and compared them (a competing ISP-blame tool's live demo, a status-page tool, an uptime monitor, a path-tracing tool, a speed test, router apps). Recorded what to take and what to avoid | Asked for the design to be grounded in similar products |
 | Plans | Split the work into seven plans with a schedule; wrote the first one (codecs, protocol, reflector) as test-first tasks with exact byte layouts, then self-reviewed it and fixed two wrong test expectations | Chose to keep the full scope; repo published |
 
-Counts so far: 11 review agents, roughly 180 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-20 — Plan 1 built: codecs, protocol, reflector (merged as `ae5a50e`)
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Test-first build | 11 tasks, each started from a failing test (red observed for 9 of 11; for two the test and code were written together, noted honestly). 120 tests: codecs, replay window, rate limits, UDP and TCP reflector over real loopback sockets, a loss-injecting proxy that checks upload/download loss classification end to end | Asked that the agent implement directly instead of spawning one implementer per task; asked for frequent commits and pushes |
+| Independent reviews | Four batch reviews by separate agents, one whole-branch review by the most capable model, one re-review of its fixes. Real bugs found and fixed: a NAT slot could be taken over by another IP; a set leaked at the connection cap; a reset connection could skip cleanup; a shutdown write could race a periodic write and corrupt the replay file; abandoned NAT tests held slots for up to an hour. A test that could not fail without the fix was rewritten until it could | Merge after review |
+| Measurements that changed the design | On Windows a TCP connect to a closed port takes about 2 s (the OS retries the SYN after each RST), so the router check uses an unprivileged ICMP echo there instead (4–8 ms). Windows `netsh` prints Korean field names as UTF-8; the parser tests use the real labels | — |
+
+Counts so far: 17 review agents, roughly 230 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.
