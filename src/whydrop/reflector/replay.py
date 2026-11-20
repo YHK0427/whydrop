@@ -73,12 +73,19 @@ class Tombstones:
         self._prune()
 
     def flush(self) -> None:
+        self.write(self.snapshot())
+
+    def snapshot(self) -> dict[int, list[float]]:
+        """Pruned copy, taken on the event loop so write() can run in a thread."""
         self._prune()
+        return dict(self._t)
+
+    def write(self, entries: dict[int, list[float]]) -> None:
         if self._path is None:
             return
         tmp = self._path.with_name(self._path.name + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "t": {str(k): v for k, v in self._t.items()}}, f)
+            json.dump({"v": 1, "t": {str(k): v for k, v in entries.items()}}, f)
             f.flush()
             os.fsync(f.fileno())  # survive power loss: never replace with an empty file
         os.replace(tmp, self._path)
