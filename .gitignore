@@ -1,4 +1,3 @@
-.private/
 .env
 whydrop.toml
 *.db
