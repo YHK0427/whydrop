@@ -1,0 +1,116 @@
+import asyncio
+import sqlite3
+
+import pytest
+
+from whydrop.agent.events import Event
+from whydrop.agent.store import Store, SampleRow
+
+TABLES = {"meta", "samples_1s", "samples_1m", "udp_seq_ring", "segments", "events", "incidents", "conditions",
+          "selfcheck", "findings", "nat_runs", "nat_results", "annotations", "agent_runs"}
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def tables(path):
+    con = sqlite3.connect(path)
+    try:
+        names = {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
+        cols = {t: {r[1] for r in con.execute(f"pragma table_info({t})")} for t in names}
+        return names, cols, con.execute("pragma user_version").fetchone()[0]
+    finally:
+        con.close()
+
+
+def test_schema_v1_tables(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.close()
+    run(main())
+    names, cols, version = tables(tmp_path / "w.db")
+    assert TABLES <= names and version == 1
+    assert all("agent_id" in cols[t] for t in TABLES - {"meta"})
+
+
+def test_migrations_idempotent(tmp_path):
+    async def main():
+        for _ in range(2):
+            s = Store(tmp_path / "w.db")
+            await s.open()
+            await s.close()
+    run(main())
+    assert tables(tmp_path / "w.db")[2] == 1
+
+
+def test_samples_and_late(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.add_samples([SampleRow(1000, "dns", "isp:1/udp", sent=1, ok=0, lost=1)])
+        await s.flush()
+        await s.late(1000, "dns", "isp:1/udp")
+        await s.add_samples([SampleRow(2000, "dns", "isp:1/udp", sent=1, ok=0, lost=1)])
+        await s.late(2000, "dns", "isp:1/udp")  # still buffered: updated in memory
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    rows = con.execute("select ts_ms, lost, late from samples_1s order by ts_ms").fetchall()
+    con.close()
+    assert rows == [(1000, 0, 1), (2000, 0, 1)]
+
+
+def test_events_roundtrip(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.add_events([Event("reassoc", 5, None, {"ap": "AP-1"})])
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    assert con.execute("select ts_ms, kind, detail_json from events").fetchall() == [(5, "reassoc", '{"ap": "AP-1"}')]
+    con.close()
+
+
+def test_agent_runs_lifecycle(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        rid = await s.run_start(100, "0.1.0", {"clock": "synced"})
+        await s.run_heartbeat(rid, 130)
+        await s.run_stop(rid, 160)
+        await s.close()
+        return rid
+    rid = run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    assert con.execute("select start_ms, heartbeat_ms, stop_ms from agent_runs where id=?", (rid,)).fetchone() == (100, 130, 160)
+    con.close()
+
+
+def test_meta_salt_persists(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        a = await s.meta_get("salt")
+        if a is None:
+            await s.meta_set("salt", "abc")
+        await s.close()
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        b = await s.meta_get("salt")
+        await s.close()
+        return b
+    assert run(main()) == "abc"
+
+
+def test_insert_only_known_tables(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.insert("selfcheck", ts_ms=1, result_json="{}")
+        with pytest.raises(ValueError):
+            await s.insert("sqlite_master; drop table events", ts_ms=1)
+        await s.close()
+    run(main())
