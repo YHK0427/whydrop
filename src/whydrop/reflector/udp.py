@@ -1,4 +1,7 @@
 """UDP side of the reflector: ECHO for PROBEs, immediate + delayed replies for NAT_REQ (spec §5.3–5.5)."""
+import asyncio
+import socket
+import sys
 import time
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
@@ -113,3 +116,72 @@ class UdpReflector:
 
     def _reply(self, p: WdPacket, t: WdType, **kw) -> bytes:
         return wd.encode(WdPacket(t, p.session_id, p.seq, p.t_send_ns, epoch=self._epoch, **kw), self._secret)
+
+
+class _Proto(asyncio.DatagramProtocol):
+    def __init__(self, r: UdpReflector):
+        self.r = r
+        self.transport: asyncio.DatagramTransport | None = None
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr: Addr):
+        for reply in self.r.handle(data, addr):
+            self.transport.sendto(reply, addr)
+
+    def error_received(self, exc):  # e.g. ICMP port unreachable from a vanished client; nothing to do
+        pass
+
+
+def linux_udp_drops(port: int, path: str = "/proc/net/udp") -> int | None:
+    """Kernel receive-queue drops for the IPv4 UDP socket bound to `port` (the same counter SO_RXQ_OVFL reports)."""
+    try:
+        with open(path, encoding="ascii") as f:
+            next(f)
+            for line in f:
+                cols = line.split()
+                if int(cols[1].rsplit(":", 1)[1], 16) == port:
+                    return int(cols[12])
+    except (OSError, StopIteration, IndexError, ValueError):
+        return None
+    return None
+
+
+class UdpServer:
+    def __init__(self, transport: asyncio.DatagramTransport, tasks: list[asyncio.Task]):
+        self._transport = transport
+        self._tasks = tasks
+        self.port: int = transport.get_extra_info("sockname")[1]
+
+    async def close(self) -> None:
+        for t in self._tasks:
+            t.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._transport.close()
+
+
+async def _every(interval: float, fn) -> None:
+    while True:
+        await asyncio.sleep(interval)
+        fn()
+
+
+async def serve_udp(r: UdpReflector, host: str, port: int) -> UdpServer:
+    loop = asyncio.get_running_loop()
+    transport, proto = await loop.create_datagram_endpoint(lambda: _Proto(r), local_addr=(host, port),
+                                                           family=socket.AF_INET)
+
+    def send_due():
+        for addr, pkt in r.due():
+            transport.sendto(pkt, addr)
+
+    tasks = [asyncio.create_task(_every(0.1, send_due)), asyncio.create_task(_every(60, r.sweep))]
+    server = UdpServer(transport, tasks)
+    if sys.platform.startswith("linux"):
+        def read_drops():
+            n = linux_udp_drops(server.port)
+            if n is not None:
+                r.rxq_ovfl = n
+        tasks.append(asyncio.create_task(_every(1.0, read_drops)))
+    return server
