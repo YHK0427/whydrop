@@ -62,9 +62,20 @@ def test_report_card_shape_and_privacy():
     assert card["protocol_blocks"] == ["dns_public:1.1.1.1:53/tcp"] and card["cgnat_hint"] is True
     assert card["nat_mapping"] == {"endpoint_independent": True, "port_preserving": False}
     assert "100.64.3.4" not in str(card) and card["ipv6_unmeasured"] is True
-    assert google_verdict(["74.125.18.7"]) == "ok" and google_verdict(["198.51.100.9"]) == "suspect"
+    assert google_verdict(["74.125.18.7"]) == "ok" and google_verdict(["198.51.100.9"]) == "unknown"
     assert google_verdict([]) == "unknown"
 
 
 def test_chaos_numbered_site_is_ok():  # Cloudflare's real answer, measured 2026-11-20
     assert env.chaos_verdict(["icn06"]) == "ok"
+
+
+def test_google_ipv6_resolver_is_not_suspect():
+    from whydrop.agent.report import google_verdict
+    assert google_verdict(["2404:6800:4004:80a::200e"]) == "unknown"
+
+
+def test_mask_pair():
+    from whydrop.agent.probes.targets import mask_pair
+    assert mask_pair("dns_isp:198.51.100.53:53/udp") == "dns_isp:x.x.x.53:53/udp"
+    assert mask_pair("dns_public:8.8.8.8:53/udp") == "dns_public:8.8.8.8:53/udp"

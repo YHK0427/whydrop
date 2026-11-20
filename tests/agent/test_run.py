@@ -136,3 +136,44 @@ def test_excluded_pairs_are_not_probed(fakes, monkeypatch):
     run_for(cfg, 6.5)
     assert ("dns_public", "8.8.8.8") in probed
     assert ("dns_router", "192.0.2.1") not in probed and ("dns_public", "9.9.9.9") not in probed
+
+
+def test_start_mid_outage_records_at_once_and_stops_quickly(fakes, monkeypatch):
+    cfg, calls, _ = fakes
+
+    async def inconclusive(*a, **k):
+        calls["selfcheck"] += 1
+        return SelfCheck("inconclusive")
+    monkeypatch.setattr(runmod, "run_selfcheck", inconclusive)
+
+    async def go():
+        stop = asyncio.Event()
+        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        await asyncio.sleep(2.0)
+        stop.set()
+        t0 = asyncio.get_running_loop().time()
+        await asyncio.wait_for(task, 5)
+        return asyncio.get_running_loop().time() - t0
+    took = asyncio.run(go())
+    assert took < 3  # the 30 s → 5 min self-check backoff does not hold up shutdown
+    assert db(cfg, "select count(*) from samples_1s where probe = 'gateway'")[0][0] >= 1  # probes ran during it
+
+
+def test_startup_failure_still_closes_the_store(fakes, monkeypatch):
+    cfg, _, _ = fakes
+
+    async def boom(c):
+        raise RuntimeError("detect failed")
+    monkeypatch.setattr(runmod.envmod, "detect_env", boom)
+    with pytest.raises(RuntimeError):
+        asyncio.run(runmod.run_agent(cfg, stop=asyncio.Event()))
+    con = sqlite3.connect(cfg.db_path)  # closed cleanly: the file opens and isn't locked
+    con.execute("BEGIN EXCLUSIVE")
+    con.close()
+
+
+def test_vpn_egress_is_a_standing_finding(fakes):
+    cfg, _, envs = fakes
+    envs[0] = EnvInfo("eth0", "192.0.2.1", "wired", (), True, False, "tailscale0")
+    run_for(cfg, 1.0)
+    assert db(cfg, "select kind from findings") == [("vpn_egress",)]

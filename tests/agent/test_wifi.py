@@ -139,3 +139,26 @@ def test_link_flap_and_speed_change(tmp_path):
     r, ev = lt.probe()
     assert sorted(e.kind for e in ev) == ["link_flap", "link_speed"]
     assert next(e for e in ev if e.kind == "link_speed").detail == {"from": 1000, "to": 100}
+
+
+def test_without_iw_wifi_is_up_when_operstate_is_up():
+    t = WifiTracker(b"salt", now_ms=lambda: 5)
+    s = Snapshot(up=True, bssid=None, bssid_known=False)
+    assert t.update(s) == [] and t.update(s) == []
+    assert wifi.to_result(s, t, 5).ok
+
+
+def test_one_empty_iw_answer_is_not_a_reassoc(monkeypatch, tmp_path):
+    (tmp_path / "wlan0").mkdir()
+    (tmp_path / "wlan0" / "operstate").write_text("up\n")
+    answers = iter([IW_LINK, IW_STATION, ""])
+
+    async def fake_run(*a, **k):
+        return next(answers)
+    monkeypatch.setattr(wifi, "_run", fake_run)
+    p = wifi.LinuxWifi("wlan0", sys_root=tmp_path, proc_wireless=tmp_path / "none")
+    t = WifiTracker(b"salt", now_ms=lambda: 5)
+    first = asyncio.run(p.snapshot())
+    p._last_iw = -1e9
+    second = asyncio.run(p.snapshot())  # iw link came back empty once
+    assert t.update(first) == [] and t.update(second) == [] and second.bssid == first.bssid

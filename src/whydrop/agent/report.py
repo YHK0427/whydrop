@@ -5,6 +5,7 @@ from pathlib import Path
 
 from whydrop.agent.env import EnvInfo, chaos_verdict
 from whydrop.agent.probes.base import udp_exchange
+from whydrop.agent.probes.targets import mask_pair
 from whydrop.agent.selfcheck import SelfCheck
 from whydrop.net import dns
 
@@ -34,7 +35,9 @@ def google_verdict(strings: list[str]) -> str:
             ip = ipaddress.ip_address(s.strip())
         except ValueError:
             continue
-        return "ok" if any(ip in n for n in GOOGLE_RANGES) else "suspect"
+        if ip.version == 4 and any(ip in n for n in GOOGLE_RANGES):
+            return "ok"
+        return "unknown"  # IPv6 or a range not on the short list: no verdict rather than a false alarm
     return "unknown"
 
 
@@ -58,13 +61,13 @@ def conntrack_values(root: Path = Path("/proc/sys/net/netfilter")) -> dict:
 
 def report_card(env: EnvInfo, sc: SelfCheck, nat: dict | None, *, wifi: dict | None = None,
                 interception: dict | None = None, multi_ip: bool = False) -> dict:
-    blocked = sorted(k for k, why in sc.excluded.items() if "only" in why)
+    blocked = sorted(mask_pair(k) for k, why in sc.excluded.items() if "only" in why)
     cgnat = bool(nat and nat.get("public_ip") and ipaddress.ip_address(nat["public_ip"]) in CGNAT) or multi_ip
     return {
         "link": env.link,
         "median_rtt_ms": {k: round(v, 1) for k, v in sc.median_rtt.items()},
         "protocol_blocks": blocked,
-        "excluded": dict(sc.excluded),
+        "excluded": {mask_pair(k): v for k, v in sc.excluded.items()},
         "selfcheck": sc.status,
         "dns_interception": (interception or {}).get("verdict", "unknown"),
         "cgnat_hint": cgnat,

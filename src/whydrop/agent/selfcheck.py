@@ -72,7 +72,7 @@ async def run_selfcheck(pairs: list[CheckPair], gateway: Callable[[], Awaitable[
     for name in failed:
         p = meta[name]
         rounds_ok = all(  # in every round, at least two *other* providers answered
-            len({(q.provider or q.cls) for q in pairs if (q.provider or q.cls) != (p.provider or p.cls)
+            len({q.provider for q in pairs if q.provider and q.provider != p.provider
                  and len(ok_rounds[q.pair]) > r and ok_rounds[q.pair][r]}) >= 2
             for r in range(tries))
         if not rounds_ok:

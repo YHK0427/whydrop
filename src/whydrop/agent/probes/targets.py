@@ -13,6 +13,15 @@ def pair_id(cls: str, addr: str, port: int, proto: str) -> str:
     return f"{cls}:{addr}:{port}/{proto}"
 
 
+def mask_pair(pair: str) -> str:
+    """Router and ISP resolver addresses identify a home network; logs and reports show only the last octet."""
+    cls, _, rest = pair.partition(":")
+    if cls in ("dns_router", "dns_isp", "gateway"):
+        addr, _, tail = rest.partition(":")
+        return f"{cls}:x.x.x.{addr.rsplit('.', 1)[-1]}:{tail}"
+    return pair
+
+
 def is_ipv4(s: str) -> bool:
     try:
         ipaddress.IPv4Address(s)  # strict: "1" or "127.1" are not addresses
@@ -70,13 +79,13 @@ class Targets:
         return [t443[a] for a in TCP_ROTATION if a in t443 and self.usable(t443[a], "tcp")] or \
             [t for t in self.by_kind("tcp443") if self.usable(t, "tcp")]
 
-    def dns_pairs(self, cls: str) -> list[tuple[str, str | None]]:
+    def dns_pairs(self, cls: str, include_excluded: bool = False) -> list[tuple[str, str | None]]:
         """(address, provider) for router / isp / public DNS."""
         if cls == "dns_router":
             return [(self.router_dns, None)] if self.router_dns else []
         if cls == "dns_isp":
             return [(a, None) for a in self.isp_dns[:2]]
-        return [(t.addr, t.provider) for t in self.by_kind("dns") if self.usable(t, "dns_public")]
+        return [(t.addr, t.provider) for t in self.by_kind("dns") if include_excluded or self.usable(t, "dns_public")]
 
     def addr(self, host: str) -> str | None:
         """The IPv4 to probe for a target: literal as is, a hostname only once it has resolved."""

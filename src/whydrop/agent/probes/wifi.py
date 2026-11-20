@@ -91,6 +91,7 @@ class Snapshot:
     band: str | None = None
     tx_retries: int | None = None
     beacon_loss: int | None = None
+    bssid_known: bool = True  # False when iw is missing: no BSSID doesn't mean disconnected
 
 
 class WifiTracker:
@@ -115,6 +116,8 @@ class WifiTracker:
             self.ap(s.bssid)
         if prev is None:
             return []
+        if not (prev.bssid_known and s.bssid_known):
+            return [Event("reassoc", now, detail={"cause": "down"})] if prev.up and not s.up else []
         was_up, is_up = prev.up and prev.bssid, s.up and s.bssid
         if was_up and not is_up:
             return [Event("reassoc", now, detail={"cause": "down", "ap": self.ap(prev.bssid)})]
@@ -148,6 +151,7 @@ class LinuxWifi:
         self._last_iw = -1e9
         self._iw: dict = {}
         self._prev_up: bool | None = None
+        self._misses = 0
         self.iw_missing = False
 
     async def snapshot(self) -> Snapshot:
@@ -165,15 +169,20 @@ class LinuxWifi:
             try:
                 link = parse_iw_link(await _run("iw", "dev", self.iface, "link"))
                 station = parse_iw_station(await _run("iw", "dev", self.iface, "station", "dump")) if link else {}
-                self._iw = {**link, **station}
+                fresh = {**link, **station}
             except FileNotFoundError:
-                self.iw_missing, self._iw = True, {}
+                self.iw_missing, fresh = True, {}
             except (OSError, asyncio.TimeoutError):
-                self._iw = {}
+                fresh = {}
+            if fresh or not up or self._misses >= 1 or self.iw_missing:
+                self._iw, self._misses = fresh, 0
+            else:
+                self._misses += 1  # one empty answer while up (e.g. mid-scan): keep the last one
+                self._last_iw = now - IW_EVERY_S + 1  # and ask again in a second
         self._prev_up = up
         iw = self._iw if up else {}
         return Snapshot(up, iw.get("bssid"), iw.get("connected_s"), signal if signal is not None else iw.get("signal"),
-                        iw.get("freq"), None, iw.get("tx_retries"), iw.get("beacon_loss"))
+                        iw.get("freq"), None, iw.get("tx_retries"), iw.get("beacon_loss"), not self.iw_missing)
 
 
 class WindowsWifi:
@@ -190,5 +199,5 @@ def to_result(s: Snapshot, tracker: WifiTracker, t_send_ms: int) -> Result:
     detail = {"signal_dbm": s.signal_dbm, "band": s.band, "freq": s.freq,
               "ap": tracker.ap(s.bssid) if s.bssid else None,
               "tx_retries": s.tx_retries, "beacon_loss": s.beacon_loss}
-    return Result("wifi", "wifi", None, t_send_ms, bool(s.up and s.bssid), None,
+    return Result("wifi", "wifi", None, t_send_ms, bool(s.up and (s.bssid or not s.bssid_known)), None,
                   detail={k: v for k, v in detail.items() if v is not None})

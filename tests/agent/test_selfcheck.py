@@ -128,3 +128,35 @@ def test_nat_mapping_same_socket():
         return r
     r = asyncio.run(main())
     assert r == {"endpoint_independent": True, "port_preserving": True, "public_ip": "203.0.113.7"}
+
+
+def test_router_and_isp_do_not_count_as_providers():
+    pairs = [pair("dns_public:9.9.9.9:53/udp", "quad9", ok=False), pair("dns_public:8.8.8.8:53/udp", "google", ok=True),
+             pair("dns_router:192.0.2.1:53/udp", None, ok=True, cls="dns_router"),
+             pair("dns_isp:198.51.100.53:53/udp", None, ok=True, cls="dns_isp")]
+    sc = asyncio.run(run_selfcheck(pairs, gw(True), sleep=no_sleep))
+    assert sc.excluded == {}  # only one real provider answered besides quad9
+
+
+def test_nat_mapping_dependent():
+    class PerServerPort(asyncio.DatagramProtocol):
+        n = 0
+
+        def connection_made(self, t):
+            self.t = t
+            PerServerPort.n += 1
+            self.port = 40000 + PerServerPort.n
+
+        def datagram_received(self, data, addr):
+            self.t.sendto(stun_reply(data, "203.0.113.7", self.port), addr)
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        ts = [(await loop.create_datagram_endpoint(PerServerPort, local_addr=("127.0.0.1", 0), family=socket.AF_INET))[0]
+              for _ in range(2)]
+        r = await nat_mapping([("127.0.0.1", t.get_extra_info("sockname")[1]) for t in ts])
+        for t in ts:
+            t.close()
+        return r
+    r = asyncio.run(main())
+    assert r["endpoint_independent"] is False and r["port_preserving"] is False
