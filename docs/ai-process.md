@@ -37,7 +37,7 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Independent reviews | Four batch reviews by separate agents, one whole-branch review by the most capable model, one re-review of its fixes. Real bugs found and fixed: a NAT slot could be taken over by another IP; a set leaked at the connection cap; a reset connection could skip cleanup; a shutdown write could race a periodic write and corrupt the replay file; abandoned NAT tests held slots for up to an hour. A test that could not fail without the fix was rewritten until it could | Merge after review |
 | Measurements that changed the design | On Windows a TCP connect to a closed port takes about 2 s (the OS retries the SYN after each RST), so the router check uses an unprivileged ICMP echo there instead (4–8 ms). Windows `netsh` prints Korean field names as UTF-8; the parser tests use the real labels | — |
 
-Counts so far: 17 review agents, roughly 230 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+Counts so far: 16 review agents, roughly 230 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.
