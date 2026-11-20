@@ -34,7 +34,7 @@ WD 패킷은 항상 44바이트다:
 | 20 | recv_count | 4 | ECHO: 이 세션에서 reflector가 받은 서로 다른 PROBE 수 |
 | 24 | epoch | 4 | ECHO / NAT_REPLY: reflector가 켜질 때 정하는 무작위 ID |
 | 28 | rx_bitmap | 4 | ECHO: *i*번 비트(0번 = 최하위 비트)가 켜져 있으면 seq − 1 − *i*를 받았다는 뜻 |
-| 32 | arg | 4 | NAT_REQ: 지연 시간(초). NAT_REPLY: 0 = 즉시, 1 = 지연. ECHO: 지금까지 reflector 자기 소켓에서 버려진 수신 패킷 수 |
+| 32 | arg | 4 | NAT_REQ: 지연 시간(초). NAT_REPLY: 0 = 즉시, 1 = 지연. ECHO: 지금까지 reflector 자기 소켓에서 버려진 수신 패킷 수 (Linux만. 다른 OS에서는 0) |
 | 36 | hmac | 8 | `HMAC8(secret, 0–35번 바이트)` |
 
 **PROBE → ECHO.** agent가 PROBE를 보낸다 (정밀 모드에서 초당 10개). reflector는 처음 보는 seq마다 ECHO 하나로 답하고, session_id, seq, t_send_ns를 그대로 담는다.
@@ -91,10 +91,10 @@ idle ping을 reflector가 먼저 보내는 데는 이유가 있다. agent가 먼
 
 ## reflector가 절대 하지 않는 것
 
-- MAC이 틀린 패킷에는 답하지 않고, MAC을 확인하기 전에는 아무 상태도 만들지 않는다.
+- UDP에서는 MAC이 틀린 패킷에 답하지 않고, MAC을 확인하기 전에는 아무 상태도 만들지 않는다. (TCP에서는 틀린 HELLO에 4바이트 `AUTH_FAIL`로 답하고, 그 연결은 HELLO 전 슬롯 하나를 최대 5초 동안 차지한다. 이 슬롯은 수가 제한되어 있다.)
 - 답은 요청보다 크지 않고 (44 B에는 44 B), NAT_REQ 하나에는 답이 최대 두 번이다.
 - **들어오는** ECHO와 NAT_REPLY는 버린다. 그래서 자기가 보낸 답을 다시 튕겨내게 만들 수 없다.
-- (세션, seq) 하나에는 한 번만 답한다. 세션별 가장 큰 seq를 디스크에 7일 동안 보관하므로, 재시작 전에 녹화한 패킷을 보내도 답이 오지 않는다.
+- (세션, seq) 하나에는 한 번만 답한다. 세션별 가장 큰 seq를 디스크에 7일 동안 보관하므로, 재시작 전에 녹화한 패킷을 보내도 답이 오지 않는다. 이 파일은 10초마다 쓰므로, 정상 종료가 아니라 비정상 종료라면 그 직전 몇 초 동안의 패킷에는 한 번 답할 수 있다.
 
 ## 제한
 

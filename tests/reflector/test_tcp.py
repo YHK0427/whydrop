@@ -219,3 +219,22 @@ def test_hot_junk_frames_do_not_hold_slot():
         assert await _closed(rd)
         srv.close()
     run(main())
+
+
+def test_nat_slot_freed_when_agent_leaves():
+    async def forever(d):
+        await asyncio.Event().wait()
+
+    async def main():
+        r, srv, port = await _server(sleep=forever)
+        rd, wr = await _hello(port, role=Role.NAT, param=60)
+        await rd.readexactly(16)
+        assert sum(len(s) for s in r._nat.values()) == 1
+        wr.close()
+        for _ in range(100):
+            if not r._nat:
+                break
+            await asyncio.sleep(0.02)
+        assert r._nat == {}
+        srv.close()
+    run(main())

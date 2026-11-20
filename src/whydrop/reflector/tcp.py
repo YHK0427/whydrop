@@ -169,9 +169,22 @@ class TcpReflector:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _nat_role(self, h: Hello, reader, writer) -> None:
-        await self._sleep(h.param_s)
-        writer.write(encode_frame(Frame(FrameType.NAT_PROBE, 0, 0, 0)))
-        await writer.drain()
+        async def probe_later():
+            await self._sleep(h.param_s)
+            writer.write(encode_frame(Frame(FrameType.NAT_PROBE, 0, 0, 0)))
+            await writer.drain()
+
+        async def until_eof():  # free the slot as soon as the agent gives up
+            while await reader.read(FRAME_LEN):
+                pass
+
+        tasks = [asyncio.create_task(probe_later()), asyncio.create_task(until_eof())]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def serve_tcp(r: TcpReflector, host: str, port: int) -> asyncio.Server:

@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class Tombstones:
         self._cap = cap
         self._wall = wall
         self._t: dict[int, list[float]] = {}  # sid -> [highest, last_seen_wall]
+        self._io = threading.Lock()  # a periodic write may still run in its thread when the shutdown write starts
 
     def get(self, session_id: int) -> int | None:
         e = self._t.get(session_id)
@@ -84,11 +86,12 @@ class Tombstones:
         if self._path is None:
             return
         tmp = self._path.with_name(self._path.name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"v": 1, "t": {str(k): v for k, v in entries.items()}}, f)
-            f.flush()
-            os.fsync(f.fileno())  # survive power loss: never replace with an empty file
-        os.replace(tmp, self._path)
+        with self._io:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"v": 1, "t": {str(k): v for k, v in entries.items()}}, f)
+                f.flush()
+                os.fsync(f.fileno())  # survive power loss: never replace with an empty file
+            os.replace(tmp, self._path)
 
     def _prune(self) -> None:
         now = self._wall()

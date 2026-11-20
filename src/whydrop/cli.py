@@ -28,6 +28,9 @@ def _reflector(args: argparse.Namespace) -> int:
     except SecretError as e:
         print(f"whydrop: {e}", file=sys.stderr)
         return 2
+    except OSError as e:  # e.g. the port is already in use
+        print(f"whydrop: cannot listen on {args.host}:{args.port}: {e.strerror or e}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         pass
     return 0

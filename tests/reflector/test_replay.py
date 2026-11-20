@@ -123,3 +123,20 @@ def test_odd_files_are_handled(tmp_path, content):
     t = Tombstones(p)
     t.load()
     assert t.get(1) is None
+
+
+def test_concurrent_writes_leave_a_loadable_file(tmp_path):
+    import threading
+    p = tmp_path / "t.json"
+    t = Tombstones(p)
+    for sid in range(20_000):
+        t.update(sid, sid)
+    snap = t.snapshot()
+    threads = [threading.Thread(target=t.write, args=(snap,)) for _ in range(4)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    u = Tombstones(p)
+    u.load()
+    assert u.get(19_999) == 19_999

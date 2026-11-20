@@ -34,7 +34,7 @@ Every WD packet is exactly 44 bytes:
 | 20 | recv_count | 4 | ECHO: distinct PROBEs the reflector has received in this session |
 | 24 | epoch | 4 | ECHO / NAT_REPLY: random reflector boot ID |
 | 28 | rx_bitmap | 4 | ECHO: bit *i* (bit 0 = least significant) is set if seq − 1 − *i* was received |
-| 32 | arg | 4 | NAT_REQ: delay in seconds. NAT_REPLY: 0 = immediate, 1 = delayed. ECHO: the reflector's own socket receive drops so far |
+| 32 | arg | 4 | NAT_REQ: delay in seconds. NAT_REPLY: 0 = immediate, 1 = delayed. ECHO: the reflector's own socket receive drops so far (Linux; 0 elsewhere) |
 | 36 | hmac | 8 | `HMAC8(secret, bytes 0–35)` |
 
 **PROBE → ECHO.** The agent sends PROBEs (10 per second in precision mode). The reflector answers each new seq with one ECHO carrying the same session_id, seq and t_send_ns.
@@ -91,10 +91,10 @@ The idle ping is sent by the reflector on purpose: if the agent spoke first, a N
 
 ## What the reflector never does
 
-- It never answers a packet whose MAC is wrong, and never creates state before the MAC checks out.
+- Over UDP it never answers a packet whose MAC is wrong, and never creates state before the MAC checks out. (Over TCP a wrong HELLO gets a 4-byte `AUTH_FAIL`, and the connection holds one of the capped pre-HELLO slots for at most 5 s.)
 - A reply is never larger than the request (44 B for 44 B), and one NAT_REQ gets at most two replies.
 - It drops ECHO and NAT_REPLY packets coming **in**, so it can't be made to reflect its own replies.
-- Each (session, seq) is answered once. The highest seq per session is kept on disk for 7 days, so packets captured before a restart still get no answer.
+- Each (session, seq) is answered once. The highest seq per session is kept on disk for 7 days, so packets captured before a restart still get no answer. The file is written every 10 s, so after a crash (not a clean stop) packets from the last few seconds before it could be answered once.
 
 ## Limits
 

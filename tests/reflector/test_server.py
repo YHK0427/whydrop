@@ -45,3 +45,17 @@ def test_serves_logs_and_stops(tmp_path, caplog):
     assert p.type == WdType.ECHO and p.recv_count == 1
     assert (tmp_path / "tombstones.json").exists()
     assert "listening" in caplog.text and SECRET not in caplog.text
+
+
+def test_port_in_use_one_line_error(monkeypatch, capsys):
+    import socket as s
+    monkeypatch.setenv("WHYDROP_SECRET", SECRET)
+    busy = s.socket(s.AF_INET, s.SOCK_DGRAM)
+    busy.bind(("127.0.0.1", 0))
+    port = busy.getsockname()[1]
+    try:
+        assert main(["reflector", "--host", "127.0.0.1", "--port", str(port), "--state-dir", "unused"]) == 1
+    finally:
+        busy.close()
+    err = capsys.readouterr().err
+    assert "cannot listen" in err and "Traceback" not in err
