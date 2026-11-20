@@ -14,7 +14,9 @@ async def probe(gw: str, port: int | None, now_ms) -> Result:
     if sys.platform == "win32":
         from whydrop.agent import winicmp
         rtt = await asyncio.to_thread(winicmp.echo, gw, int(TIMEOUT_S * 1000))
+        from whydrop.agent import traffic
+        traffic.icmp("gateway", 7, rtt is not None)
         return Result("gateway", "gateway", None, t_send, rtt is not None, rtt, detail={"method": "icmp"})
-    ok, rtt, detail = await tcp_probe((gw, port or DEFAULT_PORT), TIMEOUT_S, rst_ok=True)
+    ok, rtt, detail = await tcp_probe((gw, port or DEFAULT_PORT), TIMEOUT_S, rst_ok=True, count_as="gateway")
     return Result("gateway", "gateway", None, t_send, ok, rtt, local_fail=bool(detail.get("local_fail")),
                   detail={**detail, "method": "tcp"})

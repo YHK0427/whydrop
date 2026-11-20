@@ -22,6 +22,6 @@ async def probe(slot: Target, now_ms, *, addr: str | None = None, on_late=None) 
     t_send = now_ms()
     data, rtt, detail = await udp_exchange((ip, slot.port), stun.build_binding(txid), TIMEOUT_S,
                                            match=lambda d, src: src[0] == ip and stun.parse_binding_response(d, txid) is not None,
-                                           on_late=on_late)
+                                           on_late=on_late, count_as="line_hb")
     return Result("line_hb", pair_id("line_hb", slot.addr, slot.port, "udp"), slot.provider, t_send,
                   data is not None, rtt, local_fail=bool(detail.get("local_fail")), detail=detail)

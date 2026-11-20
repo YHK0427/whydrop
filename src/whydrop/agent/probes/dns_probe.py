@@ -5,6 +5,7 @@ import secrets
 import socket
 import time
 
+from whydrop.agent import traffic
 from whydrop.agent.probes.base import classify_oserror, udp_exchange
 from whydrop.agent.probes.targets import pair_id
 from whydrop.agent.results import Result
@@ -34,7 +35,7 @@ async def udp(addr: str, cls: str, provider: str | None, now_ms, *, port: int = 
         return len(data) >= 2 and int.from_bytes(data[:2], "big") == qid and src[0] == addr
 
     data, rtt, detail = await udp_exchange((addr, port), dns.build_query(qid, name), timeout_s, match=match,
-                                           on_late=on_late)
+                                           on_late=on_late, count_as=probe)
     ok, extra = _judge(data, qid)
     return Result(probe, pair_id(cls, addr, port, "udp"), provider, t_send, ok, rtt if ok else None,
                   local_fail=bool(detail.get("local_fail")), detail={**detail, **extra, "port": port})
@@ -66,6 +67,7 @@ async def tcp(addr: str, cls: str, provider: str | None, now_ms, *, port: int = 
     finally:
         if writer is not None:
             writer.transport.abort()
+    traffic.tcp_dns("dns_tcp", len(dns.build_query(qid, QUERY)), len(data) if data is not None else None)
     ok, extra = _judge(data, qid)
     rtt = (time.perf_counter_ns() - t0) / 1e6
     return Result("dns_tcp", pair, provider, t_send, ok, rtt if ok else None,

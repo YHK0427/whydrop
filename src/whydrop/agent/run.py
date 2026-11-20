@@ -9,6 +9,7 @@ from whydrop import __version__
 from whydrop.agent import env as envmod
 from whydrop.agent.clock import TimeBase, wait_time_sync
 from whydrop.agent.config import Config
+from whydrop.agent.housekeeping import housekeep
 from whydrop.agent.probes import dns_probe, gateway, host_net, line_hb, link, tcp_connect, wifi
 from whydrop.agent.probes.stun_probe import StunWatcher
 from whydrop.agent.probes.targets import Targets, pair_id
@@ -285,6 +286,8 @@ class Agent:
         s.every("netwatch", NETWATCH_EVERY_S, self.job_netwatch, phase_s=NETWATCH_EVERY_S)
         s.every("selfcheck", SELFCHECK_EVERY_S, self.selfcheck_with_backoff, phase_s=SELFCHECK_EVERY_S)
         s.every("heartbeat", 30.0, lambda: self.store.run_heartbeat(run_id, self.now()), phase_s=30)
+        s.every("housekeeping", 600.0, lambda: housekeep(self.store, self.now(),
+                                                         min_free_mb=self.cfg.storage_min_free_mb), phase_s=60)
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e])), now_ms=self.now)
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
 

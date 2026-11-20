@@ -7,6 +7,8 @@ import sys
 import time
 from collections.abc import Callable
 
+from whydrop.agent import traffic
+
 LATE_S = 10.0
 SLOW_SYN_MS = 900
 _LOCAL = {errno.ENETUNREACH, errno.ENETDOWN, errno.EADDRNOTAVAIL, 10051, 10050, 10049}  # + WSAENETUNREACH/DOWN/ADDRNOTAVAIL
@@ -53,7 +55,8 @@ class _Proto(asyncio.DatagramProtocol):
 
 async def udp_exchange(dest: tuple[str, int], payload: bytes, timeout_s: float, *,
                        match: Callable[[bytes, tuple], bool], late_s: float = LATE_S,
-                       on_late: Callable[[], None] | None = None) -> tuple[bytes | None, float | None, dict]:
+                       on_late: Callable[[], None] | None = None, count_as: str | None = None
+                       ) -> tuple[bytes | None, float | None, dict]:
     """Send one datagram and wait for a matching reply. After a timeout the socket keeps listening for
     `late_s` and calls `on_late` once if the reply turns up (queueing evidence, spec §6.2)."""
     loop = asyncio.get_running_loop()
@@ -68,6 +71,8 @@ async def udp_exchange(dest: tuple[str, int], payload: bytes, timeout_s: float, 
     try:
         transport.sendto(payload)
         data, t1 = await asyncio.wait_for(asyncio.shield(fut), timeout_s)
+        if count_as:
+            traffic.udp(count_as, len(payload), len(data))
         return data, (t1 - t0) / 1e6, {}
     except asyncio.TimeoutError:
         proto.timed_out, proto.on_late = True, on_late
@@ -81,6 +86,8 @@ async def udp_exchange(dest: tuple[str, int], payload: bytes, timeout_s: float, 
         _late_listeners.add(task)
         task.add_done_callback(_late_listeners.discard)
         handed_off = True
+        if count_as:
+            traffic.udp(count_as, len(payload), None)
         return None, None, {"timeout": True}
     except OSError as e:
         return None, None, classify_oserror(e)
@@ -103,16 +110,23 @@ def _abort(sock: socket.socket) -> None:
     sock.close()
 
 
-async def tcp_probe(dest: tuple[str, int], timeout_s: float, *, rst_ok: bool) -> tuple[bool, float | None, dict]:
+async def tcp_probe(dest: tuple[str, int], timeout_s: float, *, rst_ok: bool,
+                    count_as: str | None = None) -> tuple[bool, float | None, dict]:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setblocking(False)
     t0 = time.perf_counter_ns()
     try:
         await asyncio.wait_for(_connect(sock, dest), timeout_s)
         ok, detail = True, {}
+        if count_as:
+            traffic.tcp_connect(count_as, "open")
     except ConnectionRefusedError:
         ok, detail = rst_ok, {"rst": True}
+        if count_as:
+            traffic.tcp_connect(count_as, "rst")
     except asyncio.TimeoutError:
+        if count_as:
+            traffic.tcp_connect(count_as, "timeout")
         return False, None, {"timeout": True, "elapsed_ms": round(_ms_since(t0))}
     except OSError as e:
         return False, None, classify_oserror(e)

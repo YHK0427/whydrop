@@ -4,6 +4,7 @@ import os
 import socket
 import time
 
+from whydrop.agent import traffic
 from whydrop.agent.events import Event
 from whydrop.agent.probes.base import classify_oserror
 from whydrop.agent.probes.targets import pair_id, require_ipv4
@@ -67,9 +68,11 @@ class StunWatcher:
             data, t1 = await asyncio.wait_for(fut, TIMEOUT_S)
         except asyncio.TimeoutError:
             conn.waiting.pop(txid, None)
+            traffic.udp("stun", 20, None)
             return None, None, {"timeout": True}
         except OSError as e:
             return None, None, classify_oserror(e)
+        traffic.udp("stun", 20, len(data))
         return stun.parse_binding_response(data, txid), (t1 - t0) / 1e6, {}
 
     async def probe(self) -> list:

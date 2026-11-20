@@ -93,6 +93,7 @@ class Store:
     def __init__(self, path: Path, agent_id: int = 1):
         self._path = Path(path)
         self.agent_id = agent_id
+        self.paused = False  # disk guard: when True, buffered rows are dropped instead of written
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whydrop-db")  # one connection, one thread
         self._con: sqlite3.Connection | None = None
         self._samples: list[SampleRow] = []
@@ -127,11 +128,15 @@ class Store:
                 "INSERT INTO events (agent_id, ts_ms, kind, pair, detail_json) VALUES (?, ?, ?, ?, ?)",
                 [(self.agent_id, e.ts_ms, e.kind, e.pair, json.dumps(e.detail, ensure_ascii=False)) for e in events])
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     async def flush(self) -> None:
         samples, events = self._samples, self._events
         self._samples, self._events = [], []
-        if not (samples or events):
-            return
+        if not (samples or events) or self.paused:
+            return  # disk full: drop rather than fill the disk (spec §7 disk guard)
         try:
             await self._db(self._flush_sync, samples, events)
         except sqlite3.Error:
@@ -169,6 +174,12 @@ class Store:
         def ex():
             with self._con:
                 return self._con.execute(sql, params).fetchall()
+        return await self._db(ex)
+
+    async def execute_rowcount(self, sql: str, params: tuple = ()) -> int:
+        def ex():
+            with self._con:
+                return self._con.execute(sql, params).rowcount
         return await self._db(ex)
 
     async def meta_get(self, key: str) -> str | None:
