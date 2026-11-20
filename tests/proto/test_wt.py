@@ -72,3 +72,31 @@ def test_frame_roundtrip():
 ])
 def test_valid_param(role, p, ok7500, expected):
     assert valid_param(role, p, enable_7500=ok7500) is expected
+
+
+
+def test_short_rejects_handshake_types():
+    with pytest.raises(WtError):
+        decode_short(bytes([0x57, 0x54, 1, 1]))  # WT v1 type NONCE is not a short message
+    with pytest.raises(ValueError):
+        encode_short(WtType.HELLO)
+
+
+def test_frame_rejects():
+    with pytest.raises(WtError, match="len"):
+        decode_frame(bytes([0x10]) * 15)
+    with pytest.raises(WtError, match="type"):
+        decode_frame(bytes([0x99]) + bytes(15))
+
+
+def test_hello_invalid_role_under_valid_mac():
+    import struct
+    from whydrop.proto.mac import hmac8
+    body = struct.pack("!2sBBBBII8s", b"WT", 1, 2, 9, 0, 1, 0, AN)
+    with pytest.raises(WtError, match="type"):
+        decode_hello(body + hmac8(S, N + body), S, N)
+
+
+def test_nonce_rejects_wrong_type():
+    with pytest.raises(WtError, match="type"):
+        decode_nonce(b"WT" + bytes([1, 2]) + bytes(16))

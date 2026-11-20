@@ -66,7 +66,10 @@ class Frame:
     t_send_ns: int
 
 
-def _check_head(b: bytes, size: int, want: WtType | None) -> WtType:
+_SHORT_TYPES = (WtType.AUTH_FAIL, WtType.VERSION, WtType.BUSY)
+
+
+def _check_head(b: bytes, size: int, want: tuple[WtType, ...]) -> WtType:
     if len(b) != size:
         raise WtError("len")
     magic, ver, t = _HEAD.unpack_from(b)
@@ -74,7 +77,7 @@ def _check_head(b: bytes, size: int, want: WtType | None) -> WtType:
         raise WtError("magic")
     if ver != WT_VERSION:
         raise WtError("version")
-    if t not in WtType._value2member_map_ or (want is not None and t != want):
+    if t not in want:
         raise WtError("type")
     return WtType(t)
 
@@ -89,7 +92,7 @@ def encode_nonce(nonce: bytes) -> bytes:
 
 
 def decode_nonce(b: bytes) -> bytes:
-    _check_head(b, NONCE_LEN, WtType.NONCE)
+    _check_head(b, NONCE_LEN, (WtType.NONCE,))
     return _NONCE.unpack(b)[3]
 
 
@@ -99,13 +102,14 @@ def encode_hello(h: Hello, secret: bytes, nonce: bytes) -> bytes:
 
 
 def decode_hello(b: bytes, secret: bytes, nonce: bytes) -> Hello:
-    _check_head(b, HELLO_LEN, WtType.HELLO)
+    _check_head(b, HELLO_LEN, (WtType.HELLO,))
     body = b[:_HELLO.size]
     _check_mac(hmac8(secret, nonce + body), b[_HELLO.size:])
     _, _, _, role, _, sid, param, anonce = _HELLO.unpack(body)
-    if role not in Role._value2member_map_:
-        raise WtError("type")
-    return Hello(Role(role), sid, param, anonce)
+    try:
+        return Hello(Role(role), sid, param, anonce)
+    except ValueError:
+        raise WtError("type") from None
 
 
 def encode_hello_ok(epoch: int, secret: bytes, anonce: bytes) -> bytes:
@@ -114,18 +118,20 @@ def encode_hello_ok(epoch: int, secret: bytes, anonce: bytes) -> bytes:
 
 
 def decode_hello_ok(b: bytes, secret: bytes, anonce: bytes) -> int:
-    _check_head(b, HELLO_OK_LEN, WtType.HELLO_OK)
+    _check_head(b, HELLO_OK_LEN, (WtType.HELLO_OK,))
     body = b[:_HELLO_OK.size]
     _check_mac(hmac8(secret, anonce + body), b[_HELLO_OK.size:])
     return _HELLO_OK.unpack(body)[3]
 
 
 def encode_short(t: WtType) -> bytes:
+    if t not in _SHORT_TYPES:
+        raise ValueError(f"{t!r} is not a short message")
     return _HEAD.pack(WT_MAGIC, WT_VERSION, t)
 
 
 def decode_short(b: bytes) -> WtType:
-    return _check_head(b, SHORT_LEN, None)
+    return _check_head(b, SHORT_LEN, _SHORT_TYPES)
 
 
 def encode_frame(f: Frame) -> bytes:
@@ -135,10 +141,11 @@ def encode_frame(f: Frame) -> bytes:
 def decode_frame(b: bytes) -> Frame:
     if len(b) != FRAME_LEN:
         raise WtError("len")
-    t, flags, _, seq, t_ns = _FRAME.unpack(b)
-    if t not in FrameType._value2member_map_:
-        raise WtError("type")
-    return Frame(FrameType(t), flags, seq, t_ns)
+    t, flags, _, seq, t_ns = _FRAME.unpack(b)  # rsv is ignored on receive, sent as 0
+    try:
+        return Frame(FrameType(t), flags, seq, t_ns)
+    except ValueError:
+        raise WtError("type") from None
 
 
 def valid_param(role: Role, param_s: int, *, enable_7500: bool) -> bool:

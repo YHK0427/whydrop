@@ -48,7 +48,9 @@ def precheck(data: bytes) -> str | None:
         return "magic"
     if data[2] != WD_VERSION:
         return "version"
-    if data[3] not in WdType._value2member_map_:
+    try:
+        WdType(data[3])
+    except ValueError:
         return "type"
     return None
 
