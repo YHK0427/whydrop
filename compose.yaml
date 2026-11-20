@@ -1,0 +1,30 @@
+# whydrop agent: records your connection 24/7. Start with `docker compose up -d`.
+# Host networking is required: the agent must see the real interfaces, gateway and Wi-Fi, not Docker's.
+services:
+  whydrop:
+    build: .
+    image: whydrop:local
+    command: ["agent"]
+    network_mode: host
+    user: "10001"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 128m
+    cpu_shares: 256              # lower priority only; a hard CPU quota would distort the measurements
+    environment:
+      WHYDROP_DB_PATH: /data/whydrop.db
+    volumes:
+      - whydrop-data:/data
+      - /run/systemd/resolve:/run/systemd/resolve:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  whydrop-data:
