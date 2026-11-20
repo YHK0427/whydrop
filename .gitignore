@@ -6,3 +6,4 @@ whydrop.toml
 __pycache__/
 .venv/
 dist/
+.superpowers/
