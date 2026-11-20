@@ -114,3 +114,39 @@ def test_insert_only_known_tables(tmp_path):
             await s.insert("sqlite_master; drop table events", ts_ms=1)
         await s.close()
     run(main())
+
+
+def test_same_second_written_twice_is_merged(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.add_samples([SampleRow(1000, "dns", "p", sent=2, ok=2, lost=0, rtt_min=10.0, rtt_avg=10.0, rtt_max=10.0)])
+        await s.flush()
+        await s.late(1000, "dns", "p")
+        await s.add_samples([SampleRow(1000, "dns", "p", sent=1, ok=1, lost=0, rtt_min=40.0, rtt_avg=40.0, rtt_max=40.0)])
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    row = con.execute("select sent, ok, late, rtt_min, rtt_avg, rtt_max from samples_1s").fetchone()
+    con.close()
+    assert row == (3, 3, 1, 10.0, 20.0, 40.0)
+
+
+def test_failed_flush_keeps_the_batch(tmp_path, monkeypatch):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.add_samples([SampleRow(1000, "dns", "p", sent=1, ok=1, lost=0)])
+        real = s._flush_sync
+
+        def boom(*a):
+            raise sqlite3.OperationalError("database is locked")
+        s._flush_sync = boom
+        with pytest.raises(sqlite3.OperationalError):
+            await s.flush()
+        s._flush_sync = real
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    assert con.execute("select count(*) from samples_1s").fetchone()[0] == 1
+    con.close()

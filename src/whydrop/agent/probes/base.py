@@ -47,7 +47,7 @@ class _Proto(asyncio.DatagramProtocol):
             self.fut.set_result((data, time.perf_counter_ns()))
 
     def error_received(self, exc):
-        if not self.fut.done():
+        if not self.timed_out and not self.fut.done():
             self.fut.set_exception(exc)
 
 
@@ -64,10 +64,10 @@ async def udp_exchange(dest: tuple[str, int], payload: bytes, timeout_s: float, 
     except OSError as e:
         return None, None, classify_oserror(e)
     t0 = time.perf_counter_ns()
-    transport.sendto(payload)
+    handed_off = False
     try:
+        transport.sendto(payload)
         data, t1 = await asyncio.wait_for(asyncio.shield(fut), timeout_s)
-        transport.close()
         return data, (t1 - t0) / 1e6, {}
     except asyncio.TimeoutError:
         proto.timed_out, proto.on_late = True, on_late
@@ -80,10 +80,13 @@ async def udp_exchange(dest: tuple[str, int], payload: bytes, timeout_s: float, 
         task = asyncio.create_task(linger())
         _late_listeners.add(task)
         task.add_done_callback(_late_listeners.discard)
+        handed_off = True
         return None, None, {"timeout": True}
     except OSError as e:
-        transport.close()
         return None, None, classify_oserror(e)
+    finally:
+        if not handed_off:  # also on cancellation
+            transport.close()
 
 
 async def _connect(sock: socket.socket, dest: tuple[str, int]) -> None:
@@ -110,13 +113,12 @@ async def tcp_probe(dest: tuple[str, int], timeout_s: float, *, rst_ok: bool) ->
     except ConnectionRefusedError:
         ok, detail = rst_ok, {"rst": True}
     except asyncio.TimeoutError:
-        _abort(sock)
-        return False, None, {"timeout": True}
+        return False, None, {"timeout": True, "elapsed_ms": round(_ms_since(t0))}
     except OSError as e:
-        _abort(sock)
         return False, None, classify_oserror(e)
-    rtt = _ms_since(t0)
-    _abort(sock)
+    finally:
+        rtt = _ms_since(t0)
+        _abort(sock)  # every path, including cancellation
     if ok and rtt >= SLOW_SYN_MS:  # a lost SYN shows up as a slow success; count it as a failure
         return False, rtt, {**detail, "slow_syn_ms": round(rtt)}
     return ok, rtt, detail

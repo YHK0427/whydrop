@@ -167,3 +167,28 @@ def test_hung_job_is_not_stacked():
 def test_interval_must_be_positive():
     with pytest.raises(ValueError):
         Scheduler().every("x", 0, None)
+
+
+def test_inflight_allows_failing_probe_to_keep_rate():
+    ft = FakeTime()
+    starts = []
+
+    async def slow_probe():  # fails after its 1.0 s timeout, longer than the gap to the next tick
+        t0 = ft.t
+        starts.append(t0)
+        while ft.t < t0 + 1.05:  # wait on the shared fake clock without moving it
+            await asyncio.sleep(0)
+
+    async def main():
+        stop = asyncio.Event()
+        s = Scheduler(rng=random.Random(6), mono=ft.mono, sleep=ft.sleep)
+        s.every("line_hb", 1.0, slow_probe, max_inflight=3)
+        task = asyncio.create_task(s.run(stop))
+        while ft.t < 20:
+            await asyncio.sleep(0)
+        stop.set()
+        await task
+        return s
+
+    s = asyncio.run(main())
+    assert len(starts) >= 18 and not s.skipped.get("line_hb")

@@ -49,6 +49,19 @@ MIGRATIONS: list[str] = [
         heartbeat_ms INTEGER, stop_ms INTEGER, version TEXT, tags_json TEXT);
     """,
 ]
+# A second written twice (a result that arrived after its bucket was flushed) is merged, never replaced.
+_UPSERT = (f"INSERT INTO samples_1s (agent_id, {_SAMPLE_COLS}) VALUES ({', '.join('?' * 17)}) "
+           "ON CONFLICT (agent_id, ts_ms, probe, pair) DO UPDATE SET "
+           "rtt_avg = CASE WHEN ok + excluded.ok = 0 THEN NULL ELSE "
+           "(COALESCE(rtt_avg, 0) * ok + COALESCE(excluded.rtt_avg, 0) * excluded.ok) / (ok + excluded.ok) END, "
+           "sent = sent + excluded.sent, ok = ok + excluded.ok, lost = lost + excluded.lost, "
+           "lost_up = lost_up + excluded.lost_up, lost_down = lost_down + excluded.lost_down, "
+           "lost_dir_unknown = lost_dir_unknown + excluded.lost_dir_unknown, late = late + excluded.late, "
+           "local_fail = local_fail + excluded.local_fail, "
+           "rtt_min = MIN(COALESCE(rtt_min, excluded.rtt_min), COALESCE(excluded.rtt_min, rtt_min)), "
+           "rtt_max = MAX(COALESCE(rtt_max, excluded.rtt_max), COALESCE(excluded.rtt_max, rtt_max)), "
+           "rtt_p95 = MAX(COALESCE(rtt_p95, excluded.rtt_p95), COALESCE(excluded.rtt_p95, rtt_p95)), "
+           "extra_json = COALESCE(excluded.extra_json, extra_json)")
 _INSERTABLE = {"segments", "incidents", "conditions", "selfcheck", "findings", "nat_runs", "nat_results",
                "annotations", "udp_seq_ring"}
 
@@ -82,7 +95,7 @@ class Store:
         self.agent_id = agent_id
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whydrop-db")  # one connection, one thread
         self._con: sqlite3.Connection | None = None
-        self._samples: dict[tuple[int, str, str], SampleRow] = {}
+        self._samples: list[SampleRow] = []
         self._events: list[Event] = []
 
     async def _db(self, fn, *args):
@@ -95,38 +108,38 @@ class Store:
         con.execute("PRAGMA synchronous=NORMAL")
         version = con.execute("PRAGMA user_version").fetchone()[0]
         for i, sql in enumerate(MIGRATIONS[version:], start=version + 1):
-            with con:
-                con.executescript(sql)
-                con.execute(f"PRAGMA user_version = {i}")
+            con.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version = {i};\nCOMMIT;")  # tables + version, atomically
         self._con = con
 
     async def open(self) -> None:
         await self._db(self._open_sync)
 
     async def add_samples(self, rows: list[SampleRow]) -> None:
-        for r in rows:
-            self._samples[(r.ts_ms, r.probe, r.pair)] = r
+        self._samples.extend(rows)
 
     async def add_events(self, events: list[Event]) -> None:
         self._events.extend(events)
 
     def _flush_sync(self, samples: list[SampleRow], events: list[Event]) -> None:
         with self._con:
-            self._con.executemany(
-                f"INSERT OR REPLACE INTO samples_1s (agent_id, {_SAMPLE_COLS}) VALUES ({', '.join('?' * 17)})",
-                [(self.agent_id, *astuple(r)) for r in samples])
+            self._con.executemany(_UPSERT, [(self.agent_id, *astuple(r)) for r in samples])
             self._con.executemany(
                 "INSERT INTO events (agent_id, ts_ms, kind, pair, detail_json) VALUES (?, ?, ?, ?, ?)",
                 [(self.agent_id, e.ts_ms, e.kind, e.pair, json.dumps(e.detail, ensure_ascii=False)) for e in events])
 
     async def flush(self) -> None:
-        samples, events = list(self._samples.values()), self._events
-        self._samples, self._events = {}, []
-        if samples or events:
+        samples, events = self._samples, self._events
+        self._samples, self._events = [], []
+        if not (samples or events):
+            return
+        try:
             await self._db(self._flush_sync, samples, events)
+        except sqlite3.Error:
+            self._samples, self._events = samples + self._samples, events + self._events  # retry next flush
+            raise
 
     async def late(self, ts_ms: int, probe: str, pair: str) -> None:
-        r = self._samples.get((ts_ms, probe, pair))
+        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)), None)
         if r is not None:
             r.late += 1
             r.lost = max(0, r.lost - 1)
@@ -178,8 +191,12 @@ class Store:
         await self.execute("UPDATE agent_runs SET stop_ms=? WHERE id=?", (ts_ms, run_id))
 
     async def close(self) -> None:
-        if self._con is not None:
-            await self.flush()
-            await self._db(self._con.close)
-            self._con = None
-        self._pool.shutdown(wait=True)
+        try:
+            if self._con is not None:
+                try:
+                    await self.flush()
+                finally:
+                    await self._db(self._con.close)
+                    self._con = None
+        finally:
+            self._pool.shutdown(wait=True)

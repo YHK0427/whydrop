@@ -7,22 +7,26 @@ import sys
 
 from whydrop.agent.results import Result
 
-_WIN_DEFAULT = re.compile(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", re.M)
+_WIN_DEFAULT = re.compile(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)", re.M)
 
 
 def parse_linux_route(text: str) -> tuple[str | None, str | None]:
-    """/proc/net/route → (gateway, interface) of the default route."""
+    """/proc/net/route → (gateway or None for point-to-point, interface) of the default route."""
     for line in text.splitlines()[1:]:
         cols = line.split()
-        if len(cols) >= 4 and cols[1] == "00000000" and int(cols[3], 16) & 0x2:
-            return socket.inet_ntoa(struct.pack("<I", int(cols[2], 16))), cols[0]
+        if len(cols) >= 8 and cols[1] == "00000000" and cols[7] == "00000000" and int(cols[3], 16) & 0x1:
+            gw = int(cols[2], 16)
+            return (socket.inet_ntoa(struct.pack("<I", gw)) if gw else None), cols[0]
     return None, None
 
 
 def parse_windows_route(text: str) -> tuple[str | None, str | None]:
-    """`route print -4 0.0.0.0` → (gateway, interface address) of the default route."""
+    """`route print -4 0.0.0.0` → (gateway or None when "On-link", interface address) of the default route."""
     m = _WIN_DEFAULT.search(text)
-    return (m.group(1), m.group(2)) if m else (None, None)
+    if not m:
+        return None, None
+    gw = m.group(1) if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", m.group(1)) else None
+    return gw, m.group(2)
 
 
 async def default_route() -> tuple[str | None, str | None]:
@@ -61,6 +65,6 @@ async def probe(now_ms) -> Result:
     t_send = now_ms()
     gw, iface = await default_route()
     addr = source_address()
-    ok = gw is not None and addr is not None
+    ok = iface is not None and addr is not None  # a default route exists (with or without a gateway)
     return Result("host_net", "host_net", None, t_send, ok, None,
-                  detail={"route": gw is not None, "addr": addr is not None, "iface": iface})
+                  detail={"route": iface is not None, "addr": addr is not None, "iface": iface})

@@ -6,7 +6,7 @@ import time
 
 from whydrop.agent.events import Event
 from whydrop.agent.probes.base import classify_oserror
-from whydrop.agent.probes.targets import pair_id
+from whydrop.agent.probes.targets import pair_id, require_ipv4
 from whydrop.agent.results import Result
 from whydrop.net import stun
 
@@ -40,7 +40,7 @@ class StunWatcher:
     """One connected UDP socket per server, kept open so its NAT mapping stays the same between probes."""
 
     def __init__(self, servers: list[tuple[str, int, str]], now_ms):
-        self._servers = servers              # (ip, port, provider)
+        self._servers = [(require_ipv4(ip), port, prov) for ip, port, prov in servers]  # (ip, port, provider)
         self._now_ms = now_ms
         self._conns: dict[int, _Server] = {}
         self.public_ip: str | None = None

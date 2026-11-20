@@ -4,7 +4,7 @@ import os
 from whydrop.agent.config import Target
 from whydrop.agent.probes import dns_probe
 from whydrop.agent.probes.base import udp_exchange
-from whydrop.agent.probes.targets import pair_id
+from whydrop.agent.probes.targets import pair_id, require_ipv4
 from whydrop.agent.results import Result
 from whydrop.net import stun
 
@@ -12,7 +12,7 @@ TIMEOUT_S = 1.0
 
 
 async def probe(slot: Target, now_ms, *, addr: str | None = None, on_late=None) -> Result:
-    ip = addr or slot.addr
+    ip = require_ipv4(addr or slot.addr)  # never let a DNS lookup sit inside the line measurement
     if slot.kind == "dns":
         r = await dns_probe.udp(ip, "line_hb", slot.provider, now_ms, port=slot.port, probe="line_hb",
                                 on_late=on_late, timeout_s=TIMEOUT_S)
@@ -21,7 +21,7 @@ async def probe(slot: Target, now_ms, *, addr: str | None = None, on_late=None) 
     txid = os.urandom(12)
     t_send = now_ms()
     data, rtt, detail = await udp_exchange((ip, slot.port), stun.build_binding(txid), TIMEOUT_S,
-                                           match=lambda d, src: stun.parse_binding_response(d, txid) is not None,
+                                           match=lambda d, src: src[0] == ip and stun.parse_binding_response(d, txid) is not None,
                                            on_late=on_late)
     return Result("line_hb", pair_id("line_hb", slot.addr, slot.port, "udp"), slot.provider, t_send,
                   data is not None, rtt, local_fail=bool(detail.get("local_fail")), detail=detail)

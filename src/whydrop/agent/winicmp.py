@@ -19,7 +19,10 @@ def _init():
     api.IcmpSendEcho.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p, wt.WORD, ctypes.c_void_p, ctypes.c_void_p,
                                  wt.DWORD, wt.DWORD]
     api.IcmpSendEcho.restype = wt.DWORD
-    _api, _handle = api, api.IcmpCreateFile()
+    handle = api.IcmpCreateFile()
+    if handle in (None, 0, ctypes.c_void_p(-1).value):
+        raise OSError("IcmpCreateFile failed")
+    _api, _handle = api, handle
 
 
 def echo(addr: str, timeout_ms: int) -> float | None:

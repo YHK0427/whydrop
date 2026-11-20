@@ -22,14 +22,16 @@ class Scheduler:
     def __init__(self, rng: random.Random | None = None, mono=time.monotonic, sleep=asyncio.sleep):
         self._rng = rng or random.Random()
         self._mono, self._sleep = mono, sleep
-        self._jobs: list[tuple[str, float, Callable[[], Awaitable[None]], float]] = []
+        self._jobs: list[tuple[str, float, Callable[[], Awaitable[None]], float, int]] = []
         self._running: set[asyncio.Task] = set()
         self.skipped: dict[str, int] = {}  # ticks skipped because the previous run was still going
 
-    def every(self, name: str, interval_s: float, fn: Callable[[], Awaitable[None]], phase_s: float = 0.0) -> None:
-        if interval_s <= 0:
+    def every(self, name: str, interval_s: float, fn: Callable[[], Awaitable[None]], phase_s: float = 0.0,
+              max_inflight: int = 1) -> None:
+        """max_inflight > 1 for probes whose timeout reaches the next tick, so an outage doesn't halve the rate."""
+        if interval_s <= 0 or max_inflight < 1:
             raise ValueError(f"{name}: interval must be > 0")
-        self._jobs.append((name, interval_s, fn, phase_s))
+        self._jobs.append((name, interval_s, fn, phase_s, max_inflight))
 
     async def _safe(self, name: str, fn) -> None:
         try:
@@ -39,23 +41,25 @@ class Scheduler:
         except Exception:
             log.exception("job %s failed", name)
 
-    async def _loop(self, name: str, interval: float, fn, phase: float, start: float) -> None:
-        k, current = 0, None
+    async def _loop(self, name: str, interval: float, fn, phase: float, start: float, max_inflight: int) -> None:
+        k, inflight = 0, set()
         while True:
             target = start + phase + k * interval + self._rng.uniform(-JITTER, JITTER) * interval
             await self._sleep(max(0.0, target - self._mono()))
-            if current is not None and not current.done():
-                self.skipped[name] = self.skipped.get(name, 0) + 1  # never stack runs of a hung probe
+            inflight = {t for t in inflight if not t.done()}
+            if len(inflight) >= max_inflight:
+                self.skipped[name] = self.skipped.get(name, 0) + 1  # never pile up runs of a hung probe
             else:
-                current = asyncio.create_task(self._safe(name, fn))  # a slow run never delays other jobs
-                self._running.add(current)
-                current.add_done_callback(self._running.discard)
+                t = asyncio.create_task(self._safe(name, fn))  # a slow run never delays other jobs
+                inflight.add(t)
+                self._running.add(t)
+                t.add_done_callback(self._running.discard)
             # after a stall or a wake-up, skip the ticks that were missed instead of firing them all at once
             k = max(k + 1, math.floor((self._mono() - start - phase) / interval + 1.5))  # next tick >= 0.4 interval away
 
     async def run(self, stop: asyncio.Event) -> None:
         start = self._mono()
-        loops = [asyncio.create_task(self._loop(n, i, f, p, start)) for n, i, f, p in self._jobs]
+        loops = [asyncio.create_task(self._loop(n, i, f, p, start, m)) for n, i, f, p, m in self._jobs]
         try:
             await stop.wait()
         finally:

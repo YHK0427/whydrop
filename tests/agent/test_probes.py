@@ -181,3 +181,31 @@ def test_host_net_parses_route_fixtures():
     assert host_net.parse_linux_route(LINUX_ROUTE.splitlines()[0] + "\n") == (None, None)
     assert host_net.parse_windows_route(WINDOWS_ROUTE) == ("192.0.2.1", "192.0.2.50")
     assert host_net.parse_windows_route("Active Routes:\nNone\n") == (None, None)
+
+
+def test_probes_refuse_hostnames():
+    with pytest.raises(ValueError):
+        asyncio.run(line_hb.probe(Target("stun.cloudflare.com", 3478, "udp", "stun", "cloudflare"), NOW))
+    with pytest.raises(ValueError):
+        StunWatcher([("stun.l.google.com", 19302, "google")], NOW)
+    with pytest.raises(ValueError):
+        asyncio.run(line_hb.probe(Target("127.1", 53, "udp", "dns", "opendns"), NOW))
+
+
+def test_targets_addr_only_after_resolve():
+    t = Targets(load_config(None, {}))
+    assert t.addr("8.8.8.8") == "8.8.8.8" and t.addr("stun.cloudflare.com") is None
+    assert set(t.unresolved()) == {"stun.cloudflare.com", "stun.l.google.com"}
+    t.resolved["stun.cloudflare.com"] = "192.0.2.10"
+    assert t.addr("stun.cloudflare.com") == "192.0.2.10"
+
+
+PTP_ROUTE = """Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+ppp0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0
+"""
+WIN_ONLINK = WINDOWS_ROUTE.replace("192.0.2.1    ", "On-link      ")
+
+
+def test_host_net_point_to_point_and_onlink():
+    assert host_net.parse_linux_route(PTP_ROUTE) == (None, "ppp0")
+    assert host_net.parse_windows_route(WIN_ONLINK) == (None, "192.0.2.50")

@@ -1,5 +1,6 @@
 """Which targets are probed right now, and which are excluded and why (spec §5.1, §5.2)."""
 import asyncio
+import ipaddress
 import socket
 
 from whydrop.agent.config import Config, Target
@@ -10,6 +11,20 @@ TCP_ROTATION = ("8.8.8.8", "1.0.0.1", "208.67.222.222")
 
 def pair_id(cls: str, addr: str, port: int, proto: str) -> str:
     return f"{cls}:{addr}:{port}/{proto}"
+
+
+def is_ipv4(s: str) -> bool:
+    try:
+        ipaddress.IPv4Address(s)  # strict: "1" or "127.1" are not addresses
+        return True
+    except ValueError:
+        return False
+
+
+def require_ipv4(s: str) -> str:
+    if not is_ipv4(s):
+        raise ValueError(f"probe needs a resolved IPv4 address, got {s!r} (resolve hostnames at self-check)")
+    return s
 
 
 class Targets:
@@ -63,17 +78,18 @@ class Targets:
             return [(a, None) for a in self.isp_dns[:2]]
         return [(t.addr, t.provider) for t in self.by_kind("dns") if self.usable(t, "dns_public")]
 
-    def addr(self, host: str) -> str:
-        return self.resolved.get(host, host)
+    def addr(self, host: str) -> str | None:
+        """The IPv4 to probe for a target: literal as is, a hostname only once it has resolved."""
+        return host if is_ipv4(host) else self.resolved.get(host)
+
+    def unresolved(self) -> list[str]:
+        return [t.addr for t in self.cfg.targets if self.addr(t.addr) is None]
 
     async def resolve(self) -> None:
         loop = asyncio.get_running_loop()
         for t in self.cfg.targets:
-            try:
-                socket.inet_aton(t.addr)
+            if is_ipv4(t.addr):
                 continue
-            except OSError:
-                pass
             try:
                 infos = await loop.getaddrinfo(t.addr, t.port, family=socket.AF_INET, type=socket.SOCK_DGRAM)
                 self.resolved[t.addr] = infos[0][4][0]
