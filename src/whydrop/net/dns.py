@@ -12,10 +12,14 @@ class DnsReply:
     rcode: int
     truncated: bool
     answers: tuple[bytes, ...]  # raw RDATA of each answer
+    is_response: bool = True
 
 
 def build_query(qid: int, name: str, qtype: int = 1, qclass: int = 1) -> bytes:
-    labels = b"".join(bytes([len(p)]) + p.encode("ascii") for p in name.rstrip(".").split("."))
+    parts = [p.encode("ascii") for p in name.rstrip(".").split(".")]
+    if not all(0 < len(p) < 64 for p in parts):
+        raise ValueError(f"bad DNS name: {name!r}")
+    labels = b"".join(bytes([len(p)]) + p for p in parts)
     return _HDR.pack(qid, 0x0100, 1, 0, 0, 0) + labels + b"\x00" + struct.pack("!HH", qtype, qclass)  # RD=1
 
 
@@ -59,11 +63,11 @@ def parse_reply(data: bytes) -> DnsReply:
             raise ValueError("truncated rdata")
         answers.append(data[off:off + rdlen])
         off += rdlen
-    return DnsReply(qid, flags & 0x000F, bool(flags & 0x0200), tuple(answers))
+    return DnsReply(qid, flags & 0x000F, bool(flags & 0x0200), tuple(answers), bool(flags & 0x8000))
 
 
 def is_success(reply: DnsReply, qid: int) -> bool:
-    return reply.qid == qid and reply.rcode in (0, 3)  # NOERROR or NXDOMAIN; SERVFAIL/REFUSED fail
+    return reply.is_response and reply.qid == qid and reply.rcode in (0, 3)  # NOERROR/NXDOMAIN; SERVFAIL/REFUSED fail
 
 
 def txt_strings(rdata: bytes) -> list[str]:

@@ -94,3 +94,25 @@ def test_wait_time_sync_times_out(monkeypatch):
     async def fast_sleep(d):
         pass
     assert asyncio.run(clock.wait_time_sync(3, sleep=fast_sleep)) is False
+
+
+def test_backward_step_reported_once():
+    f = Fake()
+    t = tb(f)
+    f.advance(1)
+    f.wall -= 3600
+    assert len(t.check()) == 1
+    for _ in range(5):
+        f.advance(1)
+        assert t.check() == []
+
+
+def test_slew_never_reports_a_step():
+    f = Fake()
+    t = tb(f)
+    for _ in range(3 * 3600):   # 3 h of 1 s ticks with the wall clock running 500 ppm slow
+        f.mono += 1
+        f.boot += 1
+        f.wall += 1 - 500e-6
+        assert t.check() == []
+    assert abs(t.now_ms() - f.wall * 1000) < 1000  # timestamps still follow wall time

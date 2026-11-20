@@ -60,3 +60,13 @@ def test_tcp_frame_roundtrip_and_partial():
 def test_chaos_and_txt_query():
     q = build_query(1, "id.server", qtype=16, qclass=3)
     assert q.endswith(b"\x00\x10\x00\x03")
+
+
+def test_query_echo_is_not_success():  # a reflected query (QR=0) must not count as an answer
+    assert not is_success(parse_reply(answer(7, flags=0x0100)), 7)
+
+
+def test_bad_names_rejected():
+    for bad in ("", "a" * 64 + ".com", "a..b"):
+        with pytest.raises(ValueError):
+            build_query(1, bad)

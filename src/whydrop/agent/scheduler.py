@@ -1,6 +1,7 @@
 """Absolute-time scheduler with jitter, and the event-loop lag watchdog (spec §4)."""
 import asyncio
 import logging
+import math
 import random
 import sys
 import time
@@ -23,8 +24,11 @@ class Scheduler:
         self._mono, self._sleep = mono, sleep
         self._jobs: list[tuple[str, float, Callable[[], Awaitable[None]], float]] = []
         self._running: set[asyncio.Task] = set()
+        self.skipped: dict[str, int] = {}  # ticks skipped because the previous run was still going
 
     def every(self, name: str, interval_s: float, fn: Callable[[], Awaitable[None]], phase_s: float = 0.0) -> None:
+        if interval_s <= 0:
+            raise ValueError(f"{name}: interval must be > 0")
         self._jobs.append((name, interval_s, fn, phase_s))
 
     async def _safe(self, name: str, fn) -> None:
@@ -36,14 +40,18 @@ class Scheduler:
             log.exception("job %s failed", name)
 
     async def _loop(self, name: str, interval: float, fn, phase: float, start: float) -> None:
-        k = 0
+        k, current = 0, None
         while True:
             target = start + phase + k * interval + self._rng.uniform(-JITTER, JITTER) * interval
             await self._sleep(max(0.0, target - self._mono()))
-            t = asyncio.create_task(self._safe(name, fn))  # a slow run never delays the next tick
-            self._running.add(t)
-            t.add_done_callback(self._running.discard)
-            k += 1
+            if current is not None and not current.done():
+                self.skipped[name] = self.skipped.get(name, 0) + 1  # never stack runs of a hung probe
+            else:
+                current = asyncio.create_task(self._safe(name, fn))  # a slow run never delays other jobs
+                self._running.add(current)
+                current.add_done_callback(self._running.discard)
+            # after a stall or a wake-up, skip the ticks that were missed instead of firing them all at once
+            k = max(k + 1, math.floor((self._mono() - start - phase) / interval + 1.5))  # next tick >= 0.4 interval away
 
     async def run(self, stop: asyncio.Event) -> None:
         start = self._mono()
@@ -88,6 +96,8 @@ class LagWatchdog:
                 self._emit(Event("agent_lag", self._now_ms(), detail={"phase": "end", "max_lag_ms": round(worst * 1000)}))
                 worst = 0.0
             n += 1
+            if stop.is_set() and in_lag:
+                self._emit(Event("agent_lag", self._now_ms(), detail={"phase": "end", "max_lag_ms": round(worst * 1000)}))
             if self._cpu and n % CPU_STAT_EVERY == 0:
                 cur = self._read_throttled()
                 if cur is not None and self._throttled is not None and cur > self._throttled:

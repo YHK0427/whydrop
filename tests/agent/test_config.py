@@ -54,3 +54,35 @@ def test_idle_interval_range(tmp_path, v):
 def test_example_file_loads():
     c = load_config(ROOT / "whydrop.example.toml", {})
     assert c.agent_name == "home"
+
+
+@pytest.mark.parametrize("toml", [
+    "[canary]\nidle_interval_s = 'abc'\n",
+    "isp_dns = '198.51.100.1'\n",
+    "[nat]\nenable_7500 = 'false'\n",
+    "intervals = 5\n",
+    "[intervals]\ngateway = 0\n",
+    "[udp_stream]\npps = -1\n",
+    "db_path = 5\n",
+    "[[targets]]\naddr = '9.9.9.9'\nporrt = 53\nport = 53\nkind = 'dns'\nprovider = 'quad9'\n",
+])
+def test_wrong_types_give_config_error(tmp_path, toml):
+    p = tmp_path / "w.toml"
+    p.write_text(toml)
+    with pytest.raises(ConfigError):
+        load_config(p, {})
+
+
+def test_non_utf8_file(tmp_path):
+    p = tmp_path / "w.toml"
+    p.write_bytes(bytes([0x61, 0x20, 0x3d, 0x20, 0x27, 0xff, 0xfe, 0x27, 0x0a]))
+    with pytest.raises(ConfigError):
+        load_config(p, {})
+
+
+def test_web_bind_env_targets_and_intervals(tmp_path):
+    p = tmp_path / "w.toml"
+    p.write_text("[intervals]\nstun = 20\n[[targets]]\naddr = '9.9.9.9'\nport = 53\nkind = 'dns'\nprovider = 'quad9'\n")
+    c = load_config(p, {"WHYDROP_WEB_BIND": "0.0.0.0:8790"})
+    assert c.web.bind == "0.0.0.0:8790" and c.intervals["stun"] == 20.0 and c.intervals["gateway"] == 1.0
+    assert [t.addr for t in c.targets] == ["9.9.9.9"]

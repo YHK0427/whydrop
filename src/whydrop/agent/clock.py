@@ -10,6 +10,7 @@ from whydrop.agent.events import Event
 STEP_S = 2.0               # wall vs. expected drift that counts as a clock step
 SUSPEND_LINUX_S = 2.0      # growth of BOOTTIME − MONOTONIC that means the host slept
 SUSPEND_WINDOWS_S = 5.0
+SLEW_BACK_MAX_S = 1.0     # follow wall time backwards only by less than this per tick
 TIME_ERROR = 5             # adjtimex state: clock not synchronized
 
 
@@ -52,19 +53,27 @@ class TimeBase:
             self._anchor(w, m)
             out.append(Event("suspend", int(w * 1000), detail={"slept_s": round(slept, 1)}))
         else:
-            delta = w - (self._anchor_wall + m - self._anchor_mono)
-            if abs(delta) > STEP_S:
-                if delta > 0:
+            jump = (w - self._last_wall) - (m - self._last_mono)  # step since the previous tick, not since start
+            ahead = (self._anchor_wall + m - self._anchor_mono) - w  # how far our timestamps run ahead of wall
+            if abs(jump) > STEP_S:
+                if jump > 0:
                     self._anchor(w, m)
-                out.append(Event("clock_step", self.now_ms(), detail={"delta_s": round(delta, 3)}))
+                out.append(Event("clock_step", self.now_ms(), detail={"delta_s": round(jump, 3)}))
+            elif -STEP_S < ahead < SLEW_BACK_MAX_S:
+                self._anchor(w, m)  # follow NTP slew; a sub-second move back stays inside an open 1 s bucket
         self._last_wall, self._last_mono = w, m
         return out
 
 
+_libc = None
+
+
 def _adjtimex_state() -> int:
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    buf = ctypes.create_string_buffer(512)  # struct timex with modes = 0: read-only, no privilege needed
-    return libc.adjtimex(buf)
+    global _libc
+    if _libc is None:
+        _libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    buf = ctypes.create_string_buffer(512)  # struct timex (208 B on 64-bit) with modes = 0: read-only, unprivileged
+    return _libc.adjtimex(buf)
 
 
 async def wait_time_sync(timeout_s: float = 60, sleep=asyncio.sleep) -> bool:
@@ -73,7 +82,7 @@ async def wait_time_sync(timeout_s: float = 60, sleep=asyncio.sleep) -> bool:
         return True
     for _ in range(int(timeout_s)):
         try:
-            if _adjtimex_state() != TIME_ERROR:
+            if _adjtimex_state() != TIME_ERROR:  # -1 (call failed) also passes: can't tell, don't block
                 return True
         except (OSError, AttributeError, TypeError):
             return True  # can't tell: don't block startup
