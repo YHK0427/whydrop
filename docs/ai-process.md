@@ -21,6 +21,14 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Document split | — | Public docs (user/contributor facing) stay in this repo; the internal design, plans, raw reviews and environment notes are kept outside it |
 | Adversarial round | Three more agents told to break the design rather than review it: a red team (walked outage timelines and simulated the line rule), a skeptic (scope, honesty, demo risk), and a parity/leak audit. The agent re-ran the red team's simulation before accepting it, then simulated its own fix | Asked for the adversarial round. Fixes adopted; kept the full feature list for v0.1 despite the skeptic's estimate |
 
+## 2026-11-20 — UI/UX design and implementation plans
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| UI/UX design | Applied three design skills (usability heuristics, a data-visualization procedure, visual direction). Chart colors were checked with a color-vision validator script instead of by eye, and text contrast was computed (all text ≥ 4.5:1) | Asked for UI/UX to be planned from the start, with skills |
+| References | Opened similar products in a browser and compared them (a competing ISP-blame tool's live demo, a status-page tool, an uptime monitor, a path-tracing tool, a speed test, router apps). Recorded what to take and what to avoid | Asked for the design to be grounded in similar products |
+| Plans | Split the work into seven plans with a schedule; wrote the first one (codecs, protocol, reflector) as test-first tasks with exact byte layouts, then self-reviewed it and fixed two wrong test expectations | Chose to keep the full scope; repo published |
+
 Counts so far: 11 review agents, roughly 180 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
