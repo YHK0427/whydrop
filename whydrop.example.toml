@@ -1,0 +1,52 @@
+# whydrop agent configuration. Every key is optional; this file documents the full schema.
+# Precedence: WHYDROP_* environment variables > this file > built-in defaults.
+# Secrets never go here: WHYDROP_SECRET and WHYDROP_UI_TOKEN come from the environment only.
+
+agent_name = "home"                      # shown in the dashboard header and alerts
+# reflector = "reflector.example.net"    # enables precision mode (needs WHYDROP_SECRET)
+db_path = "./whydrop-data/whydrop.db"
+
+# Auto-detection overrides (leave unset unless detection gets it wrong)
+# gateway = "192.0.2.1"
+# gateway_port = 1                       # a closed TCP port on the router (RST = alive)
+# router_dns = "192.0.2.1"
+# isp_dns = ["198.51.100.53"]
+# wifi_interface = "wlan0"
+
+# Probe intervals in seconds
+# [intervals]
+# gateway = 1.0
+# line_hb = 1.0
+# dns = 5.0
+# dns_tcp = 5.0
+# stun = 10.0
+# tcp_connect = 2.0
+
+# Replace the public targets (e.g. to drop a provider). Each needs addr, port, kind (dns | stun | tcp443), provider.
+# [[targets]]
+# addr = "9.9.9.9"
+# port = 53
+# kind = "dns"
+# provider = "quad9"
+
+[web]
+bind = "127.0.0.1:8790"                  # the compose quick start uses 0.0.0.0:8790
+allowed_hosts = []                       # extra Host names allowed besides localhost and the bind address
+public_view_default = false
+
+[canary]
+idle_interval_s = 600                    # 30–7500; how long the idle TCP connection stays silent
+
+[udp_stream]
+pps = 10
+
+[nat]
+enable_7500 = false                      # allow the 7500 s TCP nat-test delay (RFC 5382 minimum)
+
+[notify]
+# webhook_url = "https://ntfy.sh/your-topic"
+# format = "ntfy"                        # json | ntfy | discord
+# kuma_push_url = ""
+
+[storage]
+# min_free_mb = 2048                     # stop writing below this much free space
