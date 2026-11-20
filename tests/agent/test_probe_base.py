@@ -76,9 +76,15 @@ def test_local_vs_icmp_errors(code, key):
     assert d.get(key) is True and len([k for k in ("local_fail", "icmp") if d.get(k)]) == 1
 
 
+def winsock_error(code: int) -> OSError:
+    e = OSError("x")
+    e.winerror = code  # only Windows fills winerror from the constructor; set it so the test runs everywhere
+    return e
+
+
 def test_windows_winsock_codes_classified():
-    assert classify_oserror(OSError(None, "x", None, 10051)).get("local_fail")  # WSAENETUNREACH
-    assert classify_oserror(OSError(None, "x", None, 10065)).get("icmp")        # WSAEHOSTUNREACH
+    assert classify_oserror(winsock_error(10051)).get("local_fail")  # WSAENETUNREACH
+    assert classify_oserror(winsock_error(10065)).get("icmp")        # WSAEHOSTUNREACH
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows retries SYN after RST (~2 s); gateway uses ICMP there")
