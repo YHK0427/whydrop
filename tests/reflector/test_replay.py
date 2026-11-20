@@ -125,18 +125,32 @@ def test_odd_files_are_handled(tmp_path, content):
     assert t.get(1) is None
 
 
-def test_concurrent_writes_leave_a_loadable_file(tmp_path):
+
+def test_concurrent_writes_are_serialized(tmp_path, monkeypatch):
+    import json
     import threading
-    p = tmp_path / "t.json"
-    t = Tombstones(p)
-    for sid in range(20_000):
-        t.update(sid, sid)
-    snap = t.snapshot()
-    threads = [threading.Thread(target=t.write, args=(snap,)) for _ in range(4)]
+
+    import whydrop.reflector.replay as replay
+    t = Tombstones(tmp_path / "t.json")
+    active, overlapped = [0], []
+    real_dump = json.dump
+
+    def slow_dump(obj, f):  # widen the window in which two unserialized writers would overlap
+        active[0] += 1
+        if active[0] > 1:
+            overlapped.append(True)
+        time.sleep(0.1)
+        real_dump(obj, f)
+        active[0] -= 1
+    monkeypatch.setattr(replay.json, "dump", slow_dump)
+    snaps = [{1: [n, time.time()]} for n in (1, 2)]
+    threads = [threading.Thread(target=t.write, args=(snap,)) for snap in snaps]
     for th in threads:
         th.start()
     for th in threads:
         th.join()
-    u = Tombstones(p)
+    monkeypatch.undo()
+    assert not overlapped
+    u = Tombstones(tmp_path / "t.json")
     u.load()
-    assert u.get(19_999) == 19_999
+    assert u.get(1) in (1, 2)

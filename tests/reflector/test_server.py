@@ -47,15 +47,15 @@ def test_serves_logs_and_stops(tmp_path, caplog):
     assert "listening" in caplog.text and SECRET not in caplog.text
 
 
-def test_port_in_use_one_line_error(monkeypatch, capsys):
+def test_port_in_use_one_line_error(monkeypatch, capsys, tmp_path):
     import socket as s
     monkeypatch.setenv("WHYDROP_SECRET", SECRET)
     busy = s.socket(s.AF_INET, s.SOCK_DGRAM)
     busy.bind(("127.0.0.1", 0))
     port = busy.getsockname()[1]
     try:
-        assert main(["reflector", "--host", "127.0.0.1", "--port", str(port), "--state-dir", "unused"]) == 1
+        assert main(["reflector", "--host", "127.0.0.1", "--port", str(port), "--state-dir", str(tmp_path)]) == 1
     finally:
         busy.close()
     err = capsys.readouterr().err
-    assert "cannot listen" in err and "Traceback" not in err
+    assert "failed to start" in err and "Traceback" not in err
