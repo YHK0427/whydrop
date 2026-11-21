@@ -37,7 +37,16 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Independent reviews | Four batch reviews by separate agents, one whole-branch review by the most capable model, one re-review of its fixes. Real bugs found and fixed: a NAT slot could be taken over by another IP; a set leaked at the connection cap; a reset connection could skip cleanup; a shutdown write could race a periodic write and corrupt the replay file; abandoned NAT tests held slots for up to an hour. A test that could not fail without the fix was rewritten until it could | Merge after review |
 | Measurements that changed the design | On Windows a TCP connect to a closed port takes about 2 s (the OS retries the SYN after each RST), so the router check uses an unprivileged ICMP echo there instead (4–8 ms). Windows `netsh` prints Korean field names as UTF-8; the parser tests use the real labels | — |
 
-Counts so far: 16 review agents, roughly 230 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-20 to 11-21 — Plan 2 built: the basic-mode agent
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Test-first build | 11 tasks: config, time base and scheduler, DNS/STUN wire helpers, SQLite store, probe primitives, network probes, Wi-Fi and link, environment and self-check, the `whydrop agent` command, retention and traffic budget, the container. 270 tests | Keep going without asking between plans; assume the cloud account exists and build precision mode anyway |
+| Reviews | Three batch reviews and one whole-branch review found real faults before deployment, among them: clock steps measured against a fixed anchor (a backward step would have emitted an event every second), a start-up self-check that blocked recording for up to 8.5 minutes during exactly the outage the tool exists for, DNS outages that could masquerade as line drops, false provider-outage findings from 10-minute re-checks, a STUN watcher stuck on stale sockets after a network change | — |
+| Live runs | Ran the agent on the laptop against the real internet several times. The self-check excluded exactly the targets measured as blocked by hand on 11-17. The live runs found three bugs the tests had missed, the most interesting being Cloudflare's real CHAOS answer (`icn06`, not the documented `ICN`), which made the interception check cry wolf | — |
+| A wrong claim, corrected | The agent reported Linux CI as green when it had not checked it; one Windows-only test assumption had kept CI red for several pushes. The human spotted it. The test was fixed, the claim corrected in the log and to the reviewer, and the agent now waits for each CI run before reporting it | Caught the red CI |
+
+Counts so far: 21 review agents, roughly 300 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.

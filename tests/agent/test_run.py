@@ -223,3 +223,19 @@ def test_selfcheck_keeps_retrying_past_the_backoff_list(fakes, monkeypatch):
     monkeypatch.setattr(runmod, "BACKOFF_S", (0.05, 0.05))
     run_for(cfg, 1.5)
     assert calls["selfcheck"] >= 6  # inline pass + background loop that does not give up
+
+
+def test_boot_clock_step_during_startup_does_not_skew_run_start(fakes, monkeypatch):
+    import time as _time
+    from whydrop.agent.clock import TimeBase as RealTimeBase
+    cfg, _, _ = fakes
+    offset = [0.0]
+
+    async def route_then_ntp_step():
+        offset[0] = 3600.0  # time sync jumps the clock while the agent waits for the route
+        return ("192.0.2.1", "eth0")
+    monkeypatch.setattr(runmod.host_net, "default_route", route_then_ntp_step)
+    monkeypatch.setattr(runmod, "TimeBase", lambda: RealTimeBase(wall=lambda: _time.time() + offset[0]))
+    run_for(cfg, 1.0)
+    [(start,)] = db(cfg, "select start_ms from agent_runs")
+    assert abs(start / 1000 - (_time.time() + 3600)) < 30

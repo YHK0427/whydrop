@@ -151,9 +151,9 @@ class Agent:
         log.info("self-check %s; excluded: %s", sc.status, _excluded_text(self.targets.excluded))
         return sc.status
 
-    async def selfcheck_with_backoff(self) -> None:
+    async def selfcheck_with_backoff(self, first_attempt: int = 0) -> None:
         """30 s → 5 min backoff, then every 5 min until a check can decide (spec §5.1)."""
-        attempt = 0
+        attempt = first_attempt
         while not self.stop.is_set():
             wait = 0 if attempt == 0 else BACKOFF_S[min(attempt - 1, len(BACKOFF_S) - 1)]
             if wait and await self.pause(wait):
@@ -162,11 +162,12 @@ class Agent:
                 return
             attempt += 1
 
-    def start_selfcheck(self) -> None:
-        """Only one self-check loop at a time; a newer trigger replaces the running one."""
+    def start_selfcheck(self, *, after_failed: bool = False) -> None:
+        """Only one self-check loop at a time; a newer trigger replaces the running one. `after_failed` skips the
+        immediate attempt when a check just came back inconclusive."""
         if self._sc_task and not self._sc_task.done():
             self._sc_task.cancel()
-        self._sc_task = self.spawn(self.selfcheck_with_backoff(), "self-check")
+        self._sc_task = self.spawn(self.selfcheck_with_backoff(1 if after_failed else 0), "self-check")
 
     # ---------- probe jobs ----------
     async def job_gateway(self):
@@ -402,6 +403,7 @@ class Agent:
         if not await wait_time_sync(TIME_SYNC_WAIT_S):
             self.tags["clock"] = "unsynced"
         self.tags["route_at_start"] = await self.wait_route()
+        self.tb.rebase()  # time sync may have stepped the clock while we waited: anchor before stamping anything
         await self.store.open()
         try:
             await self._run_opened(on_ready)
@@ -427,8 +429,10 @@ class Agent:
         await self.vpn_finding()
         # one bounded pass inline; if it can't decide (e.g. started mid-outage), keep retrying in the background
         # while the probes already record
-        if not self.tags["route_at_start"] or await self.selfcheck() != "ok":
+        if not self.tags["route_at_start"]:
             self.start_selfcheck()
+        elif await self.selfcheck() != "ok":
+            self.start_selfcheck(after_failed=True)
         self.schedule()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now)
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
