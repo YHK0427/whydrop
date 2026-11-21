@@ -6,7 +6,6 @@ import { api, dur, errorPanel, h, parseIncident, startMs, t, toast, token, when 
 
 const ORDER = ["host_net", "wifi", "lan", "line", "dns"];
 const REPO_ISSUES = "https://github.com/YHK0427/whydrop/issues/new";
-let cleanup = [];
 
 async function copyText(text) {
   try { if (navigator.clipboard) { await navigator.clipboard.writeText(text); return true; } } catch { /* fall through */ }
@@ -60,7 +59,7 @@ function card(d, headline) {   // the "card PNG": public-view words only, drawn 
 }
 
 export async function mount(main, { id, refresh }) {
-  cleanup.forEach(f => f()); cleanup = [];
+  const cleanup = [];   // this mount's own: a later mount of the same page never shares it
   let raw, st, ann;
   try {
     [raw, st] = await Promise.all([api(`/api/incidents/${id}`), api("/api/status")]);
@@ -120,6 +119,5 @@ export async function mount(main, { id, refresh }) {
         h("p", {}, d.changed ? t("drop.changed", { rule: d.provisional || "?" }) : t("drop.unchanged")),
         h("h2", {}, t("drop.annotations")), ann.length ? h("ul", { class: "drops" }, ann.map(a => h("li", {},
           h("span", { class: "what" }, t(`label.${a.label}`)), " ", h("span", { class: "faint" }, when(startMs(a)))))) : h("p", { class: "faint" }, "–"))));
+  return () => cleanup.forEach(f => f());
 }
-
-export function leave() { cleanup.forEach(f => f()); cleanup = []; }

@@ -82,3 +82,9 @@ def test_line_hb_and_tcp_pairs_hide_reflector_and_unknown_hosts():
 
 def test_mask_text_leaves_clock_times_alone():
     assert mask_text("22:07:14 and 2001:db8::1 and fe80::1:2:3") == "22:07:14 and hidden and hidden"
+
+
+def test_ipv6_after_a_colon_and_v6_pairs():
+    from whydrop.web.public import mask_pair
+    assert mask_text("peer:2001:db8::7") == "peer:hidden"
+    assert mask_pair("tcp:2001:db8::7:443/tcp") == "tcp:hidden:443/tcp"

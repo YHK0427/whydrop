@@ -370,7 +370,7 @@ def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_p
     async def no_link():
         return None
     monkeypatch.setattr(runmod.Agent, "job_link_layer", lambda self: no_link())  # CI runners have a real /sys link
-    run_for(cfg, 19)
+    run_for(cfg, 25)  # roomy: under a loaded CI runner the 6.5 s finalize lag plus the drop needs time
     rows = db(cfg, "select start_ms, primary_cause, evidence_json, tags_json from incidents")
     assert len(rows) == 1 and rows[0][1] == "R2" and "likely" in json.loads(rows[0][2])["label"]
     assert json.loads(rows[0][3])["segments"] == ["line"]

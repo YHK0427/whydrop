@@ -143,7 +143,8 @@ class HostGuard:
             arrived = (scope.get("server") or ("", 0))[0]
             literal_ok = False
             try:
-                literal_ok = ipaddress.ip_address(host) == ipaddress.ip_address(arrived)
+                a = ipaddress.ip_address(arrived)
+                literal_ok = ipaddress.ip_address(host) in (a, getattr(a, "ipv4_mapped", None))  # '::' binds see ::ffff:v4
             except ValueError:
                 pass
             if host not in self.allowed and not literal_ok:

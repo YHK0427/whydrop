@@ -6,7 +6,6 @@ import { api, cause, dur, endMs, errorPanel, h, isPublic, parseIncident, prefsGe
 
 const isRemote = () => !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 const RANGES = [["1h", 3600], ["6h", 21600], ["24h", 86400], ["7d", 604800]];
-let cleanup = [];
 
 function statusSentence(st, open, rough) {
   if (!st) return t("status.not_recording", { since: "–" });
@@ -48,7 +47,7 @@ function banners(findings, st) {
 }
 
 export async function mount(main, { refresh }) {
-  cleanup.forEach(f => f()); cleanup = [];
+  const cleanup = [];   // this mount's own: a later mount of the same page never shares it
   const range = Number(prefsGet("whydrop.range") || 3600);
   const to = Date.now(), from = to - range * 1000;
   let st, incs, conds, findings, samples, events;
@@ -85,7 +84,8 @@ export async function mount(main, { refresh }) {
   } }, t("test.button"));
   const data = series(samples, st?.mode || "basic");
   const lanesEl = lanes(data, { stepS: samples.step_s, mode: st?.mode || "basic", baseline: st?.baseline, events });
-  cleanup.push(() => lanesEl.cleanup());
+  let lanesNow = lanesEl;
+  cleanup.push(() => lanesNow.cleanup());
   const charts = h("section", { class: "panel" + (vertical ? " charts-collapsed" : "") }, h("div", { class: "row" }, rangeRow, testBtn), lanesEl);
   if (vertical) {
     const show = h("button", { class: "btn", type: "button", onclick: () => { charts.classList.remove("charts-collapsed"); show.remove(); } },
@@ -127,8 +127,19 @@ export async function mount(main, { refresh }) {
   };
   live.listeners.add(onMsg);
   const tick = setInterval(() => { if (open) sentence.textContent = statusSentence(live.status, open, roughNow); }, 1000);
-  const redraw = range <= 21600 ? setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000) : null;
+  const redraw = range <= 21600 ? setInterval(async () => {   // new data in place: focus, scroll and toggles stay
+    if (document.visibilityState !== "visible") return;
+    const t2 = Date.now();
+    try {
+      const [c, ev] = await Promise.all([api(`/api/chart?from=${t2 - range * 1000}&to=${t2}`),
+        api(`/api/events?from=${t2 - range * 1000}&to=${t2}&kind=rst`)]);
+      const fresh = lanes(series(c, live.status?.mode || "basic"), { stepS: c.step_s, mode: live.status?.mode || "basic",
+        baseline: live.status?.baseline, events: ev });
+      lanesNow.cleanup();
+      lanesNow.replaceWith(fresh);
+      lanesNow = fresh;
+    } catch { /* keep the old charts; the next tick tries again */ }
+  }, 60000) : null;
   cleanup.push(() => { live.listeners.delete(onMsg); clearInterval(tick); clearTimeout(timer); clearInterval(redraw); });
+  return () => cleanup.forEach(f => f());
 }
-
-export function leave() { cleanup.forEach(f => f()); cleanup = []; }

@@ -5,7 +5,7 @@ import { api, clock, h, t, tsMs } from "../lib.js";
 // WD (44 B): !2sBBIIQIIII + hmac8 — field names as in docs/protocol
 const WD = [["magic", 2], ["version", 1], ["type", 1], ["session_id", 4], ["seq", 4], ["t_send_ns", 8], ["recv_count", 4],
   ["epoch", 4], ["rx_bitmap", 4], ["arg", 4], ["hmac", 8]];
-let paused = false, cleanup = [];
+let paused = false;
 
 function hexdump(hex) {
   const bytes = hex.match(/../g) || [];
@@ -20,7 +20,7 @@ function hexdump(hex) {
 }
 
 export async function mount(main) {
-  cleanup.forEach(f => f()); cleanup = [];
+  const cleanup = [];   // this mount's own: a later mount of the same page never shares it
   let packets = await api("/api/packets").catch(() => []);
   const body = h("tbody"), detail = h("div");
   const draw = () => {
@@ -47,6 +47,5 @@ export async function mount(main) {
     packets = await api("/api/packets").catch(() => packets); draw();
   }, 2000);
   cleanup.push(() => clearInterval(poll));
+  return () => cleanup.forEach(f => f());
 }
-
-export function leave() { cleanup.forEach(f => f()); cleanup = []; }

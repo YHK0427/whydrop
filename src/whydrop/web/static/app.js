@@ -12,7 +12,7 @@ const routes = [
 const NAV = [["now", "#/"], ["drops", "#/drops"], ["nat", "#/nat"], ["protocol", "#/protocol"], ["network", "#/network"]];
 
 export const live = { listeners: new Set(), status: null, connected: false };
-let current = null;
+let dispose = null;
 let generation = 0;
 
 function applyTheme(mode) {
@@ -74,18 +74,18 @@ async function render() {
   const route = routes.find(r => r.re.test(hash)) || routes[0];
   const m = hash.match(route.re);
   const mine = ++generation;
-  current?.leave?.();
+  dispose?.(); dispose = null;
   const app = document.getElementById("app");
   const head = document.getElementById("head");
   head.replaceChildren(topBar(route.nav));
   const mod = await route.page();
+  if (mine !== generation) return;          // the user navigated again while the page loaded: leave theirs alone
   const main = h("main", { id: "main", tabindex: "-1" });
   app.replaceChildren(main);
   if (isPublic) app.append(h("div", { class: "publicbadge" }, t("badge.public")));
-  if (mine !== generation) return;          // the user navigated again meanwhile
-  current = mod;
-  await mod.mount(main, { id: m?.[1] && Number(m[1]), refresh: render });
-  if (mine !== generation) mod.leave?.();   // finished mounting after leaving: undo it
+  const undo = await mod.mount(main, { id: m?.[1] && Number(m[1]), refresh: render });
+  if (mine !== generation) undo?.();        // finished after a newer render began: undo only this mount
+  else dispose = undo;
   document.title = `whydrop · ${t(`nav.${route.nav}`)}`;
 }
 

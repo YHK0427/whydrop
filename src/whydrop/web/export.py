@@ -3,6 +3,7 @@ for an ISP support chat (private view: absolute local time with its UTC offset).
 import csv
 import io
 import json
+import sqlite3
 import time
 from datetime import datetime, timezone
 
@@ -85,6 +86,11 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False) -> str | 
     return "\n".join(lines)
 
 
+def _batched(cur, n: int = 1000):
+    while rows := cur.fetchmany(n):
+        yield from rows
+
+
 def stream(db, name: str, from_ms: int, to_ms: int, fmt: str, pub: bool, now_ms: int):
     """Yield the export row by row straight from the cursor (a sync generator; Starlette runs it in a thread)."""
     from contextlib import closing
@@ -94,29 +100,37 @@ def stream(db, name: str, from_ms: int, to_ms: int, fmt: str, pub: bool, now_ms:
     if db is None or not Path(db).exists():
         yield "[]" if fmt == "json" else ""
         return
-    with closing(Q.connect(db)) as con:
-        cur = con.execute(f"SELECT * FROM {table} WHERE {where[0]} ORDER BY rowid", where[1])
+    order = "start_ms" if name in ("incidents", "conditions") else "ts_ms"   # samples_* are WITHOUT ROWID
+    # Starlette may resume this generator on a different worker thread for each chunk
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    with closing(con):
+        cur = con.execute(f"SELECT * FROM {table} WHERE {where[0]} ORDER BY {order}", where[1])
         cols = [c[0] for c in cur.description if c[0] != "agent_id"]
-        first = True
+        first, chunk = True, []
         if fmt == "json":
-            yield "["
-        for raw in cur:
+            chunk.append("[")
+        for raw in _batched(cur):
             r = {k: raw[k] for k in cols}
             if pub:
                 r = public(r, KIND[name], now_ms)
             if fmt == "json":
-                yield ("" if first else ",") + json.dumps(r, ensure_ascii=False, default=str)
+                chunk.append(("" if first else ",") + json.dumps(r, ensure_ascii=False, default=str))
             else:
                 if first:
                     hdr = sorted(r)
                     buf = io.StringIO()
                     w = csv.DictWriter(buf, fieldnames=hdr, extrasaction="ignore")
                     w.writeheader()
-                    yield buf.getvalue()
+                    chunk.append(buf.getvalue())
                 buf = io.StringIO()
                 csv.DictWriter(buf, fieldnames=hdr, extrasaction="ignore").writerow(
                     {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for k, v in r.items()})
-                yield buf.getvalue()
+                chunk.append(buf.getvalue())
             first = False
+            if len(chunk) >= 1000:   # one thread hop per ~1000 rows, not per row
+                yield "".join(chunk)
+                chunk = []
         if fmt == "json":
-            yield "]"
+            chunk.append("]")
+        yield "".join(chunk)

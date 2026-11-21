@@ -8,7 +8,7 @@ import re
 KNOWN_RESOLVERS = {"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112", "208.67.222.222",
                    "208.67.220.220"}
 _V4 = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?\b")
-_V6 = re.compile(r"(?<![\w:])(?:[0-9a-fA-F:]*::[0-9a-fA-F:]*|(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4})(?![\w:])")  # never hh:mm:ss
+_V6 = re.compile(r"(?<![\w])(?:[0-9a-fA-F:]*::[0-9a-fA-F:]*[0-9a-fA-F]|(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4}|::1)(?![\w:])")  # never hh:mm:ss
 _HOST = re.compile(r"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b")   # FQDNs (reflector, this host)
 _INTERNAL = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
                                                "127.0.0.0/8", "169.254.0.0/16")]  # not is_private: that includes TEST-NETs
@@ -60,7 +60,9 @@ def mask_pair(pair: str | None) -> str | None:
     if cls == "line_hb":
         return "line_hb:hidden"     # its address can be the reflector's
     if cls in ("dns_public", "stun", "tcp"):
-        addr, _, tail = rest.partition(":")
+        addr, _, tail = rest.rpartition(":")   # the port is last; IPv6 has colons
+        if not addr:
+            addr, tail = rest, ""
         return f"{cls}:{mask_text(addr)}:{tail}" if tail else f"{cls}:{mask_text(addr)}"
     return cls
 
