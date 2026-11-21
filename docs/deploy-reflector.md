@@ -2,7 +2,7 @@
 
 # Deploying a reflector
 
-The reflector is what turns on precision mode: upload/download separation, the TCP canaries and `nat-test`. It is a small whydrop process (standard library only, a few MiB of memory) that answers authenticated packets on one port, 48100, over UDP and TCP.
+The reflector is what turns on precision mode: upload/download separation, the TCP canaries and `nat-test`. It is a small whydrop process (standard library only) that answers authenticated packets on one port, 48100, over UDP and TCP.
 
 ## What you need
 
@@ -32,7 +32,7 @@ docker build -t whydrop .
 docker run -d --name whydrop-reflector --restart unless-stopped \
   -p 48100:48100/udp -p 48100:48100/tcp \
   -e WHYDROP_SECRET='paste-your-secret-here' \
-  -v whydrop-reflector:/data --read-only --cap-drop ALL \
+  -v whydrop-reflector:/data --read-only --cap-drop ALL --security-opt no-new-privileges \
   whydrop reflector --state-dir /data
 docker logs whydrop-reflector
 ```

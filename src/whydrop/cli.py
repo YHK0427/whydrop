@@ -200,7 +200,11 @@ def _export_static(args: argparse.Namespace) -> int:
     if not args.db.exists():
         print(f"whydrop: no such database: {args.db}", file=sys.stderr)
         return 2
-    m = export_static(args.db, args.out, _iso_ms(args.from_), _iso_ms(args.to), {"mode": args.mode})
+    try:
+        m = export_static(args.db, args.out, _iso_ms(args.from_), _iso_ms(args.to), {"mode": args.mode})
+    except FileExistsError as e:
+        print(f"whydrop: {e}; choose an empty or new --out", file=sys.stderr)
+        return 2
     print(f"wrote {m['files']} data files to {args.out} (public view, read-only)")
     return 0
 

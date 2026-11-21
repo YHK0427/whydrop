@@ -65,11 +65,21 @@ local function dissect_wt(buf, pinfo, tree)
   local off, infos = 0, {}
   local len = buf:len()
   pinfo.cols.protocol = "WHYDROP"
+  local function more(at)   -- the rest of this message is in the next segment(s)
+    if #infos > 0 then pinfo.cols.info = table.concat(infos, ", ") end
+    pinfo.desegment_offset, pinfo.desegment_len = at, DESEGMENT_ONE_MORE_SEGMENT
+    return len
+  end
   while off < len do
-    if len - off >= 4 and buf(off, 2):string() == "WT" then
+    if len - off < 4 and buf(off, 1):string() == "W" then
+      return more(off)
+    elseif len - off >= 4 and buf(off, 2):string() == "WT" then
       local t = buf(off + 3, 1):uint()
       local n = WT_SIZES[t]
-      if not n or len - off < n then break end
+      if not n then break end
+      if len - off < n then   -- split across segments: ask for more and parse it whole
+        return more(off)
+      end
       local st = tree:add(p, buf(off, n), "whydrop WT " .. (WT_TYPES[t] or "?"))
       st:add(f.wt_magic, buf(off, 2)); st:add(f.wt_version, buf(off + 2, 1)); st:add(f.wt_type, buf(off + 3, 1))
       if t == 1 then st:add(f.wt_nonce, buf(off + 4, 16))
@@ -80,6 +90,8 @@ local function dissect_wt(buf, pinfo, tree)
       elseif t == 3 then st:add(f.wt_epoch, buf(off + 4, 4)); st:add(f.wt_hmac, buf(off + 8, 8)) end
       if t ~= 2 then table.insert(infos, "WT " .. (WT_TYPES[t] or "?")) end
       off = off + n
+    elseif FRAMES[buf(off, 1):uint()] and len - off < 16 then
+      return more(off)
     elseif len - off >= 16 and FRAMES[buf(off, 1):uint()] then
       local t = buf(off, 1):uint()
       local st = tree:add(p, buf(off, 16), "whydrop frame " .. FRAMES[t])

@@ -2,7 +2,7 @@
 
 # reflector 배포하기
 
-reflector가 있어야 정밀 모드가 켜져요. 업로드/다운로드 구분, TCP 카나리아, `nat-test`가 여기에 달려 있어요. reflector는 작은 whydrop 프로세스(표준 라이브러리만 쓰고 메모리는 몇 MiB)이고, 포트 하나(48100)에서 UDP와 TCP로 인증된 패킷에만 답해요.
+reflector가 있어야 정밀 모드가 켜져요. 업로드/다운로드 구분, TCP 카나리아, `nat-test`가 여기에 달려 있어요. reflector는 작은 whydrop 프로세스(표준 라이브러리만 씀)이고, 포트 하나(48100)에서 UDP와 TCP로 인증된 패킷에만 답해요.
 
 ## 필요한 것
 
@@ -32,7 +32,7 @@ docker build -t whydrop .
 docker run -d --name whydrop-reflector --restart unless-stopped \
   -p 48100:48100/udp -p 48100:48100/tcp \
   -e WHYDROP_SECRET='여기에-비밀값' \
-  -v whydrop-reflector:/data --read-only --cap-drop ALL \
+  -v whydrop-reflector:/data --read-only --cap-drop ALL --security-opt no-new-privileges \
   whydrop reflector --state-dir /data
 docker logs whydrop-reflector
 ```

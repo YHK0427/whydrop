@@ -55,7 +55,7 @@ def test_dissector_decodes_every_field(tmp_path):
     out = subprocess.run([TSHARK, "-X", f"lua_script:{lua}", "-r", str(cap), "-T", "fields", "-E", "separator=|",
                           "-e", "_ws.col.Info", "-e", "whydrop.wd.seq", "-e", "whydrop.wd.recv_count", "-e", "whydrop.wd.rx_bitmap",
                           "-e", "whydrop.wd.arg", "-e", "whydrop.wt.role", "-e", "whydrop.wt.param_s", "-e", "whydrop.wt.epoch",
-                          "-e", "whydrop.frame.seq"], capture_output=True, text=True, timeout=60)
+                          "-e", "whydrop.frame.seq"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     assert out.returncode == 0, out.stderr
     rows = [line.split("|") for line in out.stdout.strip().splitlines()]
     assert rows[0][0] == "WD PROBE seq=1201" and rows[0][1] == "1201"
@@ -65,3 +65,20 @@ def test_dissector_decodes_every_field(tmp_path):
     assert rows[4][0] == "WT HELLO role=idle" and rows[4][5] == "2" and rows[4][6] == "600"
     assert rows[5][0] == "WT HELLO_OK" and rows[5][7] == "0x00001234"
     assert rows[6][0] == "WT HB seq=88, WT HB seq=88" and rows[6][8].startswith("88")
+
+
+@pytest.mark.skipif(TSHARK is None, reason="tshark not installed")
+def test_dissector_reassembles_a_frame_split_across_segments(tmp_path):
+    hb = wt.encode_frame(wt.Frame(wt.FrameType.HB, 0, 99, 4242))
+    hello = wt.encode_hello(wt.Hello(wt.Role.HOT, 0xABCD, 0, b"a" * 8), S, b"n" * 16)
+    cap = tmp_path / "split.pcap"
+    pcap(cap, [tcp(hello[:9], 40003, 48100, 1), tcp(hello[9:] + hb[:7], 40003, 48100, 10), tcp(hb[7:], 40003, 48100, 38)])
+    lua = tmp_path / "whydrop.lua"
+    shutil.copy(LUA, lua)
+    out = subprocess.run([TSHARK, "-X", f"lua_script:{lua}", "-r", str(cap), "-T", "fields", "-E", "separator=|",
+                          "-e", "_ws.col.Info", "-e", "whydrop.wt.session_id", "-e", "whydrop.frame.seq",
+                          "-e", "whydrop.frame.t_send_ns"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    assert out.returncode == 0, out.stderr
+    rows = [line.split("|") for line in out.stdout.strip().splitlines()]
+    assert any(r[0] == "WT HELLO role=hot" and r[1] == "0x0000abcd" for r in rows), rows
+    assert any(r[0] == "WT HB seq=99" and r[2] == "99" and r[3] == "4242" for r in rows), rows

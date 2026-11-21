@@ -46,14 +46,31 @@ def key_for(path: str, span: int | None = None, incident: int | None = None, kin
     return k + ".json"
 
 
+def _first_ms(db: Path) -> int | None:
+    import sqlite3
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return con.execute("SELECT MIN(t) FROM (SELECT MIN(ts_ms) t FROM samples_1s UNION ALL SELECT MIN(ts_ms) FROM samples_1m)").fetchone()[0]
+    finally:
+        con.close()
+
+
 def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | None = None, status_extra: dict | None = None) -> dict:
     now = to_ms or int(time.time() * 1000)
-    app = create_app(db, Bus(), token=None, allowed_hosts=["localhost"], public_default=True,
+    app = create_app(db, Bus(), token=None, allowed_hosts=["localhost"], public_default=True, clock=lambda: now,
                      status=lambda: {"mode": (status_extra or {}).get("mode", "basic"), "baseline": "ready",
                                      "segments": {s: "up" for s in ("host_net", "wifi", "lan", "line", "dns")},
                                      "link": (status_extra or {}).get("link", "wifi"), **(status_extra or {})})
-    if out.exists():
+    if out.exists() and any(out.iterdir()):
+        try:
+            ours = json.loads((out / "static.json").read_text(encoding="utf-8")).get("static") is True
+        except (OSError, ValueError, AttributeError):
+            ours = False
+        if not ours:   # never wipe a directory this command didn't write
+            raise FileExistsError(f"{out} is not empty and is not an earlier export-static output")
         shutil.rmtree(out)
+    elif out.exists():
+        out.rmdir()
     shutil.copytree(STATIC, out)
     data = out / "data"
     data.mkdir()
@@ -71,8 +88,8 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
         for path in ("/api/findings", "/api/selfcheck", "/api/nat", "/api/packets"):
             await grab(path, key_for(path))
         for span in LIST_SPANS:
-            _, body = await grab("/api/incidents", key_for("/api/incidents", span), {"from": now - span * 1000, "to": now})
-        incidents = json.loads(body or b"[]")
+            code, body = await grab("/api/incidents", key_for("/api/incidents", span), {"from": now - span * 1000, "to": now})
+        incidents = json.loads(body) if code == 200 else []
         for span in RANGES:
             q = {"from": now - span * 1000, "to": now}
             await grab("/api/chart", key_for("/api/chart", span), q)
@@ -96,6 +113,6 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
             p.write_text(json.dumps(p.read_text(encoding="utf-8"), ensure_ascii=False), encoding="utf-8")
     from datetime import datetime, timezone
     day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731  dates only
-    manifest = {"static": True, "files": len(written), "recorded": [day(from_ms or now - 7 * 86_400_000), day(now)]}
+    manifest = {"static": True, "files": len(written), "recorded": [day(from_ms or _first_ms(db) or now), day(now)]}
     (out / "static.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest

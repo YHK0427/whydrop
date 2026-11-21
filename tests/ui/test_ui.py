@@ -138,3 +138,17 @@ def test_real_csp_and_token_flow(browser, base_token):
     page.wait_for_timeout(400)
     assert "dropped" in page.locator("h1.headline").inner_text() and not errors, errors
     ctx.close()
+
+
+def test_public_view_charts_are_placed_at_now(browser, base):
+    """Public charts carry seconds relative to now (no absolute times); the lanes put them back on the clock."""
+    ctx, page, errors = open_page(browser, base, "?public=1#/")
+    got = page.evaluate("""async () => {
+        const { series } = await import('/components/lanes.js');
+        const c = await (await fetch('/api/chart?public=1')).json();
+        const s = series(c, 'precision');
+        return { abs: 'x' in c, n: c.x_rel.length, last: s.x[s.x.length - 1], now: Date.now() / 1000 };
+    }""")
+    ctx.close()
+    assert not got["abs"] and got["n"] > 0 and abs(got["now"] - got["last"]) < 600, got
+    assert not errors, errors

@@ -11,7 +11,7 @@ Every probe is small and timed by when it was **sent**, so a reply that comes ba
 | Probe | Transport | Every | What it answers |
 |---|---|---|---|
 | Router check | TCP SYN to a closed port (RST = alive); ICMP echo on Windows | 1 s | Is the router reachable from this device? |
-| Line heartbeat | UDP STUN binding request, rotating across providers | 1 s | Does a packet get through the internet line and back? |
+| Line heartbeat | UDP: STUN binding requests and a DNS query, rotating across providers | 1 s | Does a packet get through the internet line and back? |
 | DNS | UDP and TCP queries to the router, the ISP's resolvers and public resolvers | 5 s | Which DNS layer answers? |
 | STUN | UDP, two providers | 10 s | What is my public IP and mapped port? |
 | TCP connect | TCP handshake to port 443 of large public services | 2 s | Does a full TCP handshake complete, and how long does it take? |
@@ -63,12 +63,12 @@ whydrop was built as a networking course project; these are the course topics it
 | Topic | In whydrop | Where to see it |
 |---|---|---|
 | Delay, loss, throughput | RTT, loss and traffic per probe | Now: the latency and loss lanes; `/api/status` |
-| DNS | DNS over UDP and over TCP (2-byte length prefix), CHAOS queries, the router → ISP resolver chain | My network; DNS causes; Protocol |
+| DNS | DNS over UDP and over TCP (2-byte length prefix), CHAOS queries, the router → ISP resolver chain | DNS causes and their evidence; My network (excluded resolvers) |
 | UDP and reliability built on top | sequence numbers, `recv_count`, `rx_bitmap`, replay protection | The packet strip in a drop; Protocol tab |
 | Multiplexing, sequence/ack numbers, RTT and timeouts | one port for UDP and TCP; RTO backoff from `TCP_INFO`; keepalive recommendations | TCP lane; *In protocol terms*; NAT timeouts |
 | The 3-way handshake | handshake RTT; router liveness from an RST | TCP connect samples; router state |
 | Router queueing | the queueing rule (latency ≥ 3× the usual + 50 ms before a drop) | Queueing causes; rough patches |
-| IP, NAT | public IP change, STUN mapped address, NAT idle timeouts, CGNAT hints | NAT timeouts; public-IP-change drops |
+| IP, NAT | public IP change, STUN mapped address, NAT idle timeouts | NAT timeouts; public-IP-change drops |
 
 ## 6. Seeing it in Wireshark
 

@@ -6,13 +6,15 @@
 
 whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **likely cause**, and what TCP and UDP did meanwhile.
 
-Three verdicts of the kind it gives (format examples):
+Three verdicts, worded as its alerts word them (durations made up):
 
-> **Internet line dropped for 46 s. Likely your ISP.** Upload was lost; the router answered the whole time. *Save the evidence with export and contact your ISP.*
+> **Internet line dropped for 46 s. Line drop in the ISP segment (likely).** *Save the evidence with export and contact your ISP.*
 >
-> **Wi-Fi dropped for 4 s. Likely a Wi-Fi problem** (re-association with the access point; signal was fine).
+> **Wi-Fi dropped for 4 s. Wi-Fi problem (likely).** *If the signal was weak, move the AP or change channel. If the AP vanished, check its power or reboot it.*
 >
-> **NAT/firewall state lost.** An idle TCP connection was forgotten after 600 s. *Set keepalive to 480 s or less.*
+> **NAT/firewall state expired (likely).** *The idle interval is longer than the measured NAT timeout: set keepalive below it.*
+
+The drop's page adds the evidence: which direction lost the packets, what the router did meanwhile, what TCP did.
 
 ## Quick start
 
@@ -20,6 +22,7 @@ Three verdicts of the kind it gives (format examples):
 git clone https://github.com/YHK0427/whydrop && cd whydrop
 docker compose up -d
 docker compose logs whydrop | grep dashboard     # open the link it prints (it carries a token)
+docker compose exec whydrop cat /data/ui-token   # the token again later (it is logged only when generated)
 ```
 
 That's basic mode: no account, no server, nothing to configure. Run it on a machine that stays on and uses the connection you care about (a home server, a Raspberry Pi, a NAS with Docker). For upload/download separation and TCP connection insight, add [precision mode](#precision-mode).
@@ -54,7 +57,7 @@ Measures how long the NAT and firewalls on your path keep an idle UDP mapping (1
 
 ## Configuration
 
-Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](whydrop.example.toml) documents every key; [`.env.example`](.env.example) the environment.
+Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](whydrop.example.toml) documents every key; [`.env.example`](.env.example) the environment. Alerts and most tuning live only in `whydrop.toml`: with Docker, put it next to `compose.yaml` and add `- ./whydrop.toml:/app/whydrop.toml:ro` under `volumes:`.
 
 | Variable | What it does |
 |---|---|
@@ -62,13 +65,12 @@ Everything is optional. Settings come from `WHYDROP_*` environment variables (in
 | `WHYDROP_SECRET` | shared secret, ≥ 32 bytes; environment only, never in a file in the repo |
 | `WHYDROP_WEB_BIND` | dashboard address; the compose default is `0.0.0.0:8790`, use `127.0.0.1:8790` to keep it local |
 | `WHYDROP_UI_TOKEN` | your own dashboard token (otherwise one is generated and logged once) |
-| `TZ` | your time zone, for the times in summaries |
 
 ## Reading the dashboard
 
 - **Now**: one sentence ("Everything is working." / "Internet line is down right now (32 s so far)."), the path diagram, your last drop, and three lanes on one time axis — packet loss (upload above the line, download below), latency with the usual range shaded, and the TCP connection's state.
 - **Drops**: every drop; open one for its timeline, the per-packet strip (10 squares a second), *In protocol terms* (sequence numbers, retransmissions, RST or not), evidence and exports.
-- **NAT timeouts**, **Protocol** (live packets as hex with every field named), **My network** (what's being watched, what was excluded and why, availability this month).
+- **NAT timeouts**, **Protocol** (live packets as hex with every field named), **My network** (the mode, which targets were excluded and why, findings, availability this month).
 - English and Korean, light and dark, phone-sized screens. **I'm testing now** opens a 2-minute window labelled as your test, so you can prove it works before a real drop happens.
 
 The dashboard needs a token when it listens beyond localhost. `?public=1` switches any page to the public view: addresses hidden, times relative — the same view the bug reports and alerts use.
@@ -118,7 +120,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 | Linux (from source: `pip install '.[web]'`) | ✓ | ✓ | ✓ |
 | Windows (native, from source) | ✓ | ✓ (no `TCP_INFO`) | ✓ (`netsh`, English or Korean) |
 | Docker Desktop / WSL | refused on purpose | — | — |
-| Raspberry Pi and other arm64 / armv7 | images are built; not yet tried on hardware | | |
+| Raspberry Pi and other arm64 / armv7 | images are built and smoke-tested under emulation on release; not yet tried on hardware | | |
 
 "✓" means it runs in CI or was run on a real machine (a Linux home server on Wi-Fi, a Windows laptop). Precision mode is tested end to end against a real reflector process over loopback, with injected loss, stalls and resets; a run against a reflector across the internet is still to come.
 

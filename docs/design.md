@@ -22,7 +22,7 @@ The rules whydrop uses to decide, with every threshold. All thresholds live in `
 5. **Conditions** (loss, latency, weak signal, Wi-Fi/LAN loss, busy host): lasting over 30 s they become *rough patches*. They label patches; they never open incidents on their own.
 6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), then frozen. Whether the final differs from the provisional is stored.
 
-An incident's end is the first success that counts as recovery; for the line, the first success of any line-quorum probe — never the canary, whose TCP retransmission timer makes it recover late.
+An incident's end is the first success that counts as recovery; for the line, the first success of a basic line-quorum probe — never the canary, whose TCP retransmission timer makes it recover late, and never udp_stream.
 
 ## Segments
 
@@ -70,21 +70,21 @@ In priority order; windows are anchored on the incident start unless a rule says
 
 | # | Likely cause | Condition | What to do next |
 |---|---|---|---|
-| R1a | Wi-Fi problem | wifi down, re-association, or a roam with loss within [start − 5 s, start + 15 s]. Signal trend as evidence | Weak signal: move the AP or change channel. AP vanished: check its power or reboot it |
+| R1a | Wi-Fi problem | wifi down, a re-association or a roam within [start − 5 s, start + 15 s] | If the signal was weak, move the AP or change channel. If the AP vanished, check its power or reboot it |
 | R1c | Wired link problem | link down or flap within ±5 s of the start | Check the cable and the switch port |
 | R1d | Host network config lost | host_net down (address or route gone while the link is up) | Restart the host's network service; if it repeats, check DHCP leases |
 | R1b | Router problem | lan down, Wi-Fi/cable up. Not evaluated when link state is unknown or egress is a VPN | Reboot the router; if it repeats, attach the records |
 | R4 | Public IP change | during the incident or within 60 s after it, both STUN providers report the same new IP twice in a row. Also a point incident on its own | Your ISP reassigned your IP; if it happens often, contact them with the records |
-| R5 | NAT/firewall state lost | the idle canary's ping never arrived while the hot connection and udp_stream lost nothing around it → point incident. "Expiry" if the idle interval exceeded the measured timeout, otherwise "loss". Also: an RST on the hot canary with a NAT mapping reset within ±10 s and no IP change → "NAT state reset" | Set keepalive to N s or less (from nat-test). For a reset: look for router or CGNAT restarts |
+| R5 | NAT/firewall state lost | the idle canary's ping never arrived while the hot connection and udp_stream lost nothing around it → point incident. "Expiry" if the idle interval exceeded the measured timeout, otherwise "loss". Also: an RST on the hot canary with a NAT mapping reset within ±10 s and no IP change → "NAT state reset" | Set keepalive below the timeout nat-test measured. For a reset: look for router or CGNAT restarts |
 | R3 | DNS failure | a DNS segment down while the line is fine. Router only → router DNS. ISP only → ISP DNS. Router + ISP with public fine → ISP DNS outage. Public only → public resolvers blocked on this network. Public together with another class → DNS-wide | Switch your device or router to a public DNS |
 | R2 | Line drop (ISP segment) | line down, lan fine, egress not via a VPN. Upload/download split added after settling | Save the evidence with export and contact your ISP |
-| R6 | Lossy line | loss condition, hot connection kept, canary RTT or RTO rising. "Line" only if line heartbeat loss rises too; otherwise "path to the reflector" | Save the evidence and contact your ISP |
-| R7 | High latency (queueing) | the latency condition, with a quiet host | Enable SQM (cake/fq_codel) on the router, or limit uploads |
+| R6 | Lossy line | labels a loss rough patch. "Line" in basic mode, or in precision mode when line heartbeat loss is ≥ 2.5 % too; otherwise "path to the reflector" | Save the evidence and contact your ISP |
+| R7 | High latency (queueing) | labels a latency rough patch; also the primary cause of a router or line drop under the queueing-first rule below | Enable SQM (cake/fq_codel) on the router, or limit uploads |
 | — | Unknown | none of the above | File a "wrong diagnosis" issue with the bug report attached |
 
 **Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too, "in-home queueing".
 
-Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot → one incident, R1a ("AP vanished"), with the WAN coming back later joining it as "router restart (likely)". A saturated uplink → R7.
+Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot seen over Wi-Fi → one incident, R1a, with the WAN coming back later joining it as "router restart (likely)". A saturated uplink → R7.
 
 ## Security
 
@@ -93,7 +93,7 @@ Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot → one in
 - **TCP**: a nonce challenge before anything is accepted, and connection caps.
 - **Secret**: `WHYDROP_SECRET` from the environment only, ≥ 32 bytes; example values refuse to start. Never logged, never exposed by the API. Basic mode needs no secret.
 - **Agent**: checks the HMAC, session and source of every ECHO and NAT_REPLY.
-- **Dashboard**: a token (Bearer header or WebSocket subprotocol, never a cookie), a custom header on every request, a Host allowlist against DNS rebinding, a strict Content-Security-Policy, and the public view for anything that leaves the machine.
+- **Dashboard**: a token (Bearer header or WebSocket subprotocol, never a cookie), a custom header on every request that changes something, a Host allowlist against DNS rebinding, a strict Content-Security-Policy, and the public view for anything that leaves the machine.
 - **Known limit**: an attacker on the path can inject an RST and fake R4 or R5. That is one more reason every cause says "likely".
 
 To report a vulnerability, see [SECURITY](../SECURITY.md).
@@ -104,5 +104,5 @@ SQLite in WAL mode, committing every 5 s (less wear on SD cards).
 
 - 1-second aggregates are kept 7 days, then rolled up into 1-minute aggregates.
 - The 1-second data within ±10 min of an incident, and its packet strip (±60 s), are kept 90 days.
-- When free space drops below min(2 GB, 5 % of the volume), writing stops and the dashboard shows a red banner (`storage.min_free_mb` overrides it).
-- `whydrop replay` re-runs the analysis over the 1-second aggregates and events (1-minute ones after 7 days) and prints the incidents; it never writes to the database. Its results are approximate.
+- When free space drops below min(2 GB, 5 % of the volume), writing stops and the log says so (`storage.min_free_mb` overrides the threshold).
+- `whydrop replay` re-runs the analysis over the 1-second aggregates and events, so it covers about the last 7 days, and prints the incidents; it never writes to the database. Its results are approximate.

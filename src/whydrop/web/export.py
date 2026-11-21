@@ -56,7 +56,7 @@ def bugreport(db, iid: int, now_ms: int) -> dict | None:
                     "('udp_stream','line_hb','stun','tcp_connect','canary','gateway') ORDER BY ts_ms LIMIT 60000", (a, b))]}
 
 
-def summary(db, iid: int, lang: str = "en", public_view: bool = False) -> str | None:
+def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: int | None = None) -> str | None:
     """Ready to paste into an ISP support chat: time with offset, duration, likely cause, next step, evidence."""
     inc = Q.incident(db, iid)
     if inc is None:
@@ -69,7 +69,7 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False) -> str | 
     when = start.strftime("%Y-%m-%d %H:%M:%S %z")
     if public_view:   # no absolute time or address in the public view
         from whydrop.web.public import mask_text
-        mins = max(0, round((time.time() * 1000 - inc["start_ms"]) / 60000))
+        mins = max(0, round(((now_ms or time.time() * 1000) - inc["start_ms"]) / 60000))
         when = f"{mins} min ago" if lang != "ko" else f"{mins}분 전"
         ev = {k: mask_text(v) if isinstance(v, str) else v for k, v in ev.items()}
     if lang == "ko":

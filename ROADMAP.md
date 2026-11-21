@@ -4,7 +4,7 @@
 
 Not in v0.1, in no particular order. Each becomes an issue; say which one you need.
 
-- **IPv6 measurement.** v0.1 measures IPv4; with an IPv6 default route present, the IPv6 path is shown as not measured.
+- **IPv6 measurement.** v0.1 measures IPv4 only; an IPv6 path is not judged.
 - **A monthly PDF report** for an ISP complaint (v0.1 has CSV/JSON, the copyable summary and the bug report).
 - **Wi-Fi details on macOS.** Basic and precision probes should run; the Wi-Fi probe doesn't exist yet.
 - **Prometheus `/metrics`.**
