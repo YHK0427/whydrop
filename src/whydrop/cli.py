@@ -66,6 +66,55 @@ def _agent(args: argparse.Namespace) -> int:
     return 0
 
 
+def _nat_test(args: argparse.Namespace) -> int:
+    import time
+
+    from whydrop.agent.config import ConfigError, load_config
+    from whydrop.agent.precision import natprobe, reflector_addr
+    from whydrop.proto.mac import SecretError, load_secret
+
+    path = args.config or (Path("whydrop.toml") if Path("whydrop.toml").exists() else None)
+    try:
+        cfg = load_config(path, os.environ)
+        secret = load_secret(os.environ, required=True)
+    except (ConfigError, SecretError) as e:
+        print(f"whydrop: {e}", file=sys.stderr)
+        return 2
+    if not cfg.reflector:
+        print("whydrop: nat-test needs a reflector (WHYDROP_REFLECTOR or reflector = in the config)", file=sys.stderr)
+        return 2
+    udp = () if args.tcp_only else tuple(d for d in natprobe.UDP_DELAYS if d <= args.max_delay)
+    tcp_all = natprobe.TCP_DELAYS + ((7500,) if args.enable_7500 else ())
+    tcp = () if args.udp_only else tuple(d for d in tcp_all if d <= args.max_delay)
+    longest = max(udp + tcp, default=0)
+    print(f"whydrop nat-test: {len(udp)} UDP + {len(tcp)} TCP delays in parallel, about {longest // 60 + 1} min")
+
+    def progress(r):
+        state = {True: "alive", False: "forgotten", None: "inconclusive"}[r.alive]
+        print(f"  {r.proto} {r.delay_s:>5} s  {state}", flush=True)
+
+    start_ms = int(time.time() * 1000)
+    try:
+        rep = asyncio.run(natprobe.nat_test(reflector_addr(cfg), secret, udp_delays=udp, tcp_delays=tcp,
+                                            on_progress=progress))
+    except KeyboardInterrupt:
+        return 130
+    print()
+    print(natprobe.format_report(rep))
+    if cfg.db_path.exists():  # an agent is recording here: keep the result next to its data
+        from whydrop.agent.store import Store
+
+        async def save():
+            store = Store(cfg.db_path)
+            await store.open()
+            try:
+                await natprobe.store_report(store, rep, start_ms=start_ms, end_ms=int(time.time() * 1000))
+            finally:
+                await store.close()
+        asyncio.run(save())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whydrop")
     parser.add_argument("--version", action="version", version=f"whydrop {__version__}")
@@ -77,6 +126,13 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--enable-7500", action="store_true", help="allow the 7500 s TCP nat-test delay")
     a = sub.add_parser("agent", help="record your connection (basic mode needs no secret)")
     a.add_argument("--config", type=Path, default=None, help="TOML file (default: ./whydrop.toml if present)")
+    n = sub.add_parser("nat-test", help="measure how long the path keeps idle UDP/TCP state (needs a reflector)")
+    n.add_argument("--config", type=Path, default=None)
+    only = n.add_mutually_exclusive_group()
+    only.add_argument("--udp-only", action="store_true")
+    only.add_argument("--tcp-only", action="store_true")
+    n.add_argument("--max-delay", type=int, default=3600, help="skip delays longer than this (seconds)")
+    n.add_argument("--enable-7500", action="store_true", help="also test 7500 s TCP (reflector must allow it)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:  # argparse exits for --version/--help/errors; main returns the code instead
@@ -85,5 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         return _reflector(args)
     if args.cmd == "agent":
         return _agent(args)
+    if args.cmd == "nat-test":
+        return _nat_test(args)
     parser.print_help()
     return 0
