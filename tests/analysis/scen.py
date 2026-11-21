@@ -84,7 +84,9 @@ class Scenario:
 
     def ctx(self, **kw) -> Context:
         prov = {s.pair: s.provider for s in self.streams}
-        return Context(provider_of=prov.get, mode=self.mode, link_kind=self.link_kind, intervals={"dns": 5}, **kw)
+        base = dict(provider_of=prov.get, mode=self.mode, link_kind=self.link_kind, intervals={"dns": 5})
+        base.update(kw)
+        return Context(**base)
 
     def _failing(self, st: Stream, sec: int):
         for (probes, pairs, providers), a, b, kind, frac in self._fails:

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from whydrop.agent.events import Event
 from whydrop.analysis import constants as K
+from whydrop.analysis import texts
 from whydrop.analysis.model import Context, Frame
 
 INCIDENT_SEGMENTS = ("host_net", "wifi", "link", "lan", "line", "dns_router", "dns_isp", "dns_public")
@@ -152,8 +153,8 @@ class Incidents:
             self._open(inc, out)
         elif out == []:
             out.append(IncidentChange("update", inc))
-        if {c.segment} | inc.segments >= {"lan", "line"} and "router restart (likely)" not in inc.chain:
-            inc.chain.append("router restart (likely)")
+        if {c.segment} | inc.segments >= {"lan", "line"} and texts.ROUTER_RESTART not in inc.chain:
+            inc.chain.append(texts.ROUTER_RESTART)
         inc.segments.add(c.segment)
         inc.open_segments.add(c.segment)
         inc.downs.append(c)
