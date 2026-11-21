@@ -93,7 +93,6 @@ class Agent:
         self._canaries: list[asyncio.Task] = []
         self._providers: dict[str, str] = {}
         self._nat_tcp_lower: int | None = None
-        self.bus = None
         self._web = None
         self._web_task = None
         self._nat_task: asyncio.Task | None = None
@@ -101,9 +100,12 @@ class Agent:
         self._gw_seen = False
         self.fb = FrameBuilder()
         self.engine: Engine | None = None
-        self.recorder = Recorder(self.store, on_incident=self._strip)
+        from whydrop.web.bus import Bus   # stdlib only: the bus exists even without the web extra
+        self.bus = Bus()
+        self.recorder = Recorder(self.store, on_incident=self._strip, bus=self.bus)
         self._started = None
         self.store.listeners.append(lambda rows, events: (self.fb.add_rows(rows), self.fb.add_events(events)))
+        self.store.listeners.append(self._publish_recorded)
         self.store.late_listeners.append(self.fb.add_late)
 
     # ---------- helpers ----------
@@ -518,6 +520,15 @@ class Agent:
                 [(self.store.agent_id, t, q, int(e), d) for t, q, e, d in rows if q >= 0]), "packet strip")
 
     # ---------- dashboard ----------
+    def _publish_recorded(self, rows, events) -> None:
+        from dataclasses import asdict
+        for r in rows:
+            self.bus.publish("sample", {"row": asdict(r)})
+        for e in events:
+            if e.kind != "tcp_info":
+                self.bus.publish("event", {"row": {"ts_ms": e.ts_ms, "kind": e.kind, "pair": e.pair,
+                                                     "detail_json": json.dumps(e.detail)}})
+
     def status(self) -> dict:
         from whydrop.agent import traffic
         return {"version": __version__, "mode": self.tags.get("mode"), "agent": self.cfg.agent_name,
@@ -560,7 +571,6 @@ class Agent:
             import uvicorn
 
             from whydrop.web.app import create_app
-            from whydrop.web.bus import Bus
             from whydrop.web.guard import LOOPBACK, allowed_hosts, resolve_token
         except ImportError:
             log.info("dashboard off: install whydrop[web] to get it")
@@ -568,7 +578,6 @@ class Agent:
         host, _, port = self.cfg.web.bind.rpartition(":")
         host = host.strip("[]") or "127.0.0.1"
         token = resolve_token(host, os.environ, self.cfg.db_path.parent)
-        self.bus = Bus()
         app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
                          public_default=self.cfg.web.public_view_default, status=self.status,
                          nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress)

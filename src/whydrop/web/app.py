@@ -18,6 +18,16 @@ STATIC = Path(__file__).with_name("static")
 
 
 DAY_MS = 86_400_000
+WS_KIND = {"sample": "sample", "segment": "segment", "incident": "incident", "condition": "condition",
+           "event": "event", "finding": "finding", "annotation": "annotation"}
+
+
+def public_message(msg: dict, now_ms: int) -> dict:
+    """Envelope {type, ts, data:{op?, row}} with the row through the public allowlist; unknown types carry nothing."""
+    kind = WS_KIND.get(msg["type"])
+    data = msg.get("data") or {}
+    row = to_public(data.get("row") or {}, kind, now_ms) if kind else {}
+    return {"type": msg["type"], "ts": 0, "data": {"op": data.get("op"), "row": row}}
 
 
 def _now() -> int:
@@ -184,10 +194,14 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             return
         await socket.accept(subprotocol="whydrop")
         q = bus.subscribe()
+        pub = socket.query_params.get("public") == "1" or public_default
 
         async def pump():
             while True:
-                await socket.send_json(await q.get())
+                msg = await q.get()
+                if pub:
+                    msg = public_message(msg, _now())
+                await socket.send_json(msg)
 
         async def drain():  # notice the browser leaving even when nothing is being sent
             while (await socket.receive())["type"] != "websocket.disconnect":
