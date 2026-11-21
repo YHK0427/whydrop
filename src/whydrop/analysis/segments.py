@@ -30,7 +30,7 @@ class _Held:
     def feed(self, t_ms: int, good: bool | None, force_bad: bool = False) -> str | None:
         if force_bad:
             self._run = (False, t_ms)
-            if self.state != "down":
+            if self.state == "up":
                 self.state = "down"
                 return "down"
             return None
@@ -42,7 +42,7 @@ class _Held:
         if good and self.state != "up" and t_ms - started >= (self.up_ms if self.state == "down" else 0):
             was, self.state = self.state, "up"
             return "up" if was == "down" else None   # the first "up" is just the start of watching
-        if not good and self.state != "down" and t_ms - started >= self.down_ms:
+        if not good and self.state == "up" and t_ms - started >= self.down_ms:  # never up → no evidence it broke
             self.state = "down"
             return "down"
         return None
@@ -56,6 +56,7 @@ class Segments:
         self._lan = "unobservable" if not ctx.lan_observable else "unknown"
         self._lan_misses: list[int] = []
         self._announced = False
+        self._seen: dict[str, int] = {}
         self._q: deque = deque()                 # (t_ms, probe, pair, provider, failed, row) of line-quorum sends
         self._line = "unknown"
         self._line_start: int | None = None
@@ -90,6 +91,12 @@ class Segments:
                 out.append(SegmentChange(frame.t_ms, "lan", "unobservable"))
         kinds = {e.kind for e in frame.events} if not frame.suspended else set()
         for seg in LOCAL:
+            if frame.samples.get((seg, seg)) is not None:
+                self._seen[seg] = frame.t_ms
+            elif self.local[seg].state == "down" and frame.t_ms - self._seen.get(seg, frame.t_ms) > K.LOCAL_STALE_S * 1000:
+                self.local[seg].state, self.local[seg]._run = "unknown", None   # its probe went away (network switch)
+                out.append(SegmentChange(frame.t_ms, seg, "up", {"stale": True}))
+        for seg in LOCAL:
             forced = (seg == "wifi" and "reassoc" in kinds) or (seg == "link" and "link_flap" in kinds)
             held = self.local[seg]
             change = held.feed(frame.t_ms, self._local_good(frame, seg), force_bad=forced)
@@ -98,6 +105,15 @@ class Segments:
                 out.append(SegmentChange(t, seg, change))
                 if change == "up" and seg != "host_net":
                     self._local_up_ms = max(self._local_up_ms, t)
+        if any(e.kind == "suspend" for e in frame.events):
+            for held in self.local.values():
+                held.state, held._run = ("unknown" if held.state == "down" else held.state), None
+            if self._line == "down":
+                self._line, self._gated, self._first_ok = "up", False, None
+            self._lan_misses.clear()
+            self._lan = "up" if self._lan == "down" else self._lan
+            for c in self._dns:
+                self._dns[c] = "up" if self._dns[c] == "down" else self._dns[c]
         lan_before = self._lan
         out += self._step_lan(frame)
         if lan_before == "down" and self._lan == "up":
@@ -112,7 +128,12 @@ class Segments:
 
     def _step_lan(self, frame: Frame) -> list[SegmentChange]:
         if self._lan == "unobservable":
-            return []
+            g = frame.samples.get(("gateway", "gateway"))
+            if g is None or g.ok == 0:
+                return []
+            self._lan = "up"                     # it answers after all (e.g. booted after us): judge it from now on
+            self.ctx.lan_observable = True
+            return [SegmentChange(frame.t_ms, "lan", "up", {"observable": True})]
         link_seg = "wifi" if self.ctx.link_kind != "wired" else "link"
         link_now = self._local_good(frame, link_seg)
         if self.local[link_seg].state == "down" or link_now is False:  # also before wifi's 3 s hold confirms it

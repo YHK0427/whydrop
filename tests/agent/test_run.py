@@ -186,6 +186,14 @@ def test_route_appears_later_then_link_is_recorded(fakes, monkeypatch):
     envs.append(EnvInfo("eth0", "192.0.2.1", "wired", (), False, False, "eth0"))
     monkeypatch.setattr(runmod, "NETWATCH_EVERY_S", 0.3)
     monkeypatch.setattr(runmod.sys, "platform", "linux")
+
+    class FakeLink:  # this host has no /sys/class/net/eth0; an unreadable carrier now records nothing
+        def __init__(self, iface, now_ms):
+            self.now = now_ms
+
+        def probe(self):
+            return Result("link", "link", None, self.now(), True, None), []
+    monkeypatch.setattr(runmod.link, "LinkTracker", FakeLink)
     run_for(cfg, 2.0)
     assert ("link",) in db(cfg, "select distinct probe from samples_1s")
 

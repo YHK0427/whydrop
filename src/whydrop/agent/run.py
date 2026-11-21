@@ -92,6 +92,7 @@ class Agent:
         self._standing: set[str] = set()
         self._canaries: list[asyncio.Task] = []
         self._providers: dict[str, str] = {}
+        self._nat_tcp_lower: int | None = None
         self._gw_seen = False
         self.fb = FrameBuilder()
         self.engine: Engine | None = None
@@ -300,7 +301,7 @@ class Agent:
     def link_layer(self) -> tuple | None:
         e = self.env
         if sys.platform == "win32":
-            return ("wifi", None)
+            return ("wifi", None) if e and e.link == "wifi" else None  # no wired tracker on Windows
         if e and e.iface and e.link == "wifi":
             return ("wifi", e.iface)
         if e and e.iface and e.link == "wired":
@@ -325,11 +326,13 @@ class Agent:
             if tick % max(1, every):
                 return
             snap = await self.wifi_src.snapshot()
+            if snap is None:
+                return
             events = self.wifi_tracker.update(snap)
             await self.record([wifi.to_result(snap, self.wifi_tracker, self.now()), *events])
         elif self.link_tracker is not None:
             r, events = self.link_tracker.probe()
-            await self.record([r, *events])
+            await self.record([x for x in (r, *events) if x is not None])
 
     async def job_tick(self):
         events = self.tb.check()
@@ -393,6 +396,9 @@ class Agent:
                 (old.gateway, old.iface, old.isp_dns, old.egress_vpn, old.egress_iface):
             return
         self.env = new
+        if self.engine is not None:  # every analysis component holds this same object
+            self.engine.ctx.vpn, self.engine.ctx.link_kind = new.egress_vpn, new.link
+            self.engine.ctx.isp_dns_known = bool(new.isp_dns)
         self.targets.router_dns = self.cfg.router_dns or new.gateway
         self.targets.isp_dns = new.isp_dns
         await self.store.add_events([Event("net_change", self.now(), detail={
@@ -423,7 +429,8 @@ class Agent:
                                                         "providers": sorted(self.targets.excluded_providers)}))
         await self.store.meta_set("analysis_context", json.dumps({
             "lan_observable": self._gw_seen, "vpn": bool(self.env and self.env.egress_vpn),
-            "link_kind": self.env.link if self.env else "unknown", "intervals": dict(self.cfg.intervals)}))
+            "link_kind": self.env.link if self.env else "unknown", "intervals": dict(self.cfg.intervals),
+            "isp_dns_known": bool(self.env and self.env.isp_dns)}))
 
     # ---------- precision mode ----------
     def pevent(self, e: Event) -> None:
@@ -472,16 +479,27 @@ class Agent:
                        excluded_providers=self.targets.excluded_providers,
                        mode="precision" if self.precision else "basic", lan_observable=self._gw_seen,
                        vpn=bool(self.env and self.env.egress_vpn), link_kind=self.env.link if self.env else "unknown",
-                       intervals=dict(self.cfg.intervals))
+                       intervals=dict(self.cfg.intervals), isp_dns_known=bool(self.env and self.env.isp_dns),
+                       nat_tcp_timeout_s=self._nat_tcp_lower)
 
     async def job_analysis(self):
         if self.engine is None:
             self._started = self._started or self.now()
             if self.now() - self._started < ANALYSIS_START_S * 1000:
                 return
-            self.engine = Engine(self.analysis_context(), reopen=await self.recorder.load_open())
+            try:
+                await self.recorder.close_previous_run(self.run_id)
+                self._nat_tcp_lower = await self.recorder.nat_tcp_lower()
+                self.engine = Engine(self.analysis_context())
+            except Exception:
+                log.exception("analysis could not start; retrying")
+                self.fb.ready(self.now())  # drop what it can't use yet, so memory stays bounded
+                return
         for frame in self.fb.ready(self.now()):
-            await self.recorder.write(self.engine.step(frame))
+            try:
+                await self.recorder.write(self.engine.step(frame))
+            except Exception:
+                log.exception("analysis step failed at %s", frame.t_ms)  # the next frames still run
 
     def _strip(self, op: str, inc) -> None:
         """Keep the per-packet strip around incidents (the in-memory ring holds 120 s)."""

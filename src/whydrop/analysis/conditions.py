@@ -49,6 +49,7 @@ class Conditions:
         self.first_ms: int | None = None
         self._loss = _Sums(K.LOSS_STREAM_WINDOW_S if ctx.mode == "precision" else K.LOSS_BASIC_WINDOW_S)
         self._gw = _Sums(K.WIFI_LAN_WINDOW_S)
+        self._hb = _Sums(K.LOSS_BASIC_WINDOW_S)   # line_hb loss: "line" vs "path to reflector"
         self._loop: deque = deque()                          # (t, p95 ms)
         self._rssi: deque = deque()                          # (t, dBm) for the 1 h median
         self._rtt: dict[str, deque] = {}                     # pair → (t, rtt) over the latency window
@@ -59,6 +60,9 @@ class Conditions:
         self._since: dict[str, int | None] = dict.fromkeys(KINDS)
         self._shown: set[str] = set()
         self.detail: dict[str, dict] = {}
+
+    def line_hb_lossy(self) -> bool:
+        return self._hb.b >= MIN_SENDS and self._hb.a / self._hb.b >= K.LOSS_FRAC / 2
 
     def active(self, kind: str) -> bool:
         return kind in self._shown
@@ -97,7 +101,7 @@ class Conditions:
             self.first_ms = t
         outage = any(seg.state(s) == "down" for s in ("line", "lan", "wifi", "link", "host_net"))
         usable = not (frame.lag or frame.suspended)
-        for w in (self._loss, self._gw):
+        for w in (self._loss, self._gw, self._hb):
             w.trim(t)
         out = []
 
@@ -105,8 +109,13 @@ class Conditions:
         if usable and not outage:
             probe = "udp_stream" if self.ctx.mode == "precision" else "line_hb"
             for (p, pair), r in frame.samples.items():
-                if p == probe and self.ctx.usable(p, pair) and r.sent - r.local_fail > 0:
-                    self._loss.add(t, r.lost + r.late, r.sent - r.local_fail)
+                judged = r.sent - r.local_fail
+                if p == probe and self.ctx.usable(p, pair) and judged > 0:
+                    if p == "udp_stream" and (r.lost + r.late) >= K.STREAM_LOSS_FRAC * judged:
+                        continue  # an outage of the path (reflector or line), not random loss
+                    self._loss.add(t, r.lost + r.late, judged)
+                if p == "line_hb" and self.ctx.usable(p, pair) and judged > 0:
+                    self._hb.add(t, r.lost + r.late, judged)
         loss = self._loss.a / self._loss.b if self._loss.b >= MIN_SENDS else 0.0
         on = loss >= (K.LOSS_FRAC / 2 if self.active("loss") or self._since["loss"] else K.LOSS_FRAC)  # hysteresis
         out += self._set("loss", on, t, {"loss": round(loss, 3)})
@@ -127,7 +136,7 @@ class Conditions:
         if dbm is not None and len(self._rssi) >= 60:
             med = _pct([x[1] for x in self._rssi], 0.5)
             weak = dbm <= K.WEAK_DBM and med - dbm >= K.WEAK_BELOW_MEDIAN_DB
-        if dbm is not None or not weak:
+        if dbm is not None:
             out += self._set("weak_signal", weak, t, {"dbm": dbm})
 
         # Wi-Fi/LAN loss: associated, but the gateway misses ≥ 10 % over 60 s

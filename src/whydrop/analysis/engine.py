@@ -32,7 +32,8 @@ class Engine:
         ic = self.inc.step(frame, sc, cc, self.seg)
         finals = self.settle.step(frame, ic, self.frames, self.cond)
         out = [Change("segment", c) for c in sc]
-        out += [Change("condition", c, label_period(c.kind, self.ctx) if c.phase == "start" else None) for c in cc]
+        out += [Change("condition", c, label_period(c.kind, self.ctx, self.cond.line_hb_lossy())
+                       if c.phase == "start" else None) for c in cc]
         for c in ic:
             if c.op == "finding":
                 out.append(Change("finding", c))

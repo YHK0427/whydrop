@@ -14,6 +14,7 @@ log = logging.getLogger(__name__)
 
 JITTER = 0.10
 LAG_SAMPLE_S = 0.1
+TIMER_GRAIN_S = max(time.get_clock_info("monotonic").resolution, 0.0157 if sys.platform == "win32" else 0.0)
 LAG_THRESHOLD_S = 0.3
 CPU_STAT_EVERY = 100  # samples (10 s)
 
@@ -92,7 +93,7 @@ class LagWatchdog:
             await self._sleep(LAG_SAMPLE_S)
             lag = self._mono() - t0 - LAG_SAMPLE_S
             if self._on_sample:
-                self._on_sample(max(0.0, lag))
+                self._on_sample(max(0.0, lag - TIMER_GRAIN_S))  # Windows wakes in ~15.6 ms steps
             if lag > LAG_THRESHOLD_S:
                 worst = max(worst, lag)
                 if not in_lag:

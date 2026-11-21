@@ -67,7 +67,7 @@ def test_r5_point_incident():
 
 def test_r5_not_when_hot_path_lost_too():
     s = Scenario.default(120, mode="precision").event("idle_state_lost", 60, interval_s=600, waited_s=605)
-    s.fail(57, 62, probes={"udp_stream"}, frac=0.5)
+    s.fail(57, 62, probes={"udp_stream"})           # the hot path had an outage too
     _, ch = run(s)
     assert [i for i in closed(ch) if i.point == "idle_state_lost"] == []
 
@@ -126,3 +126,17 @@ def test_open_incidents_closed_on_restart():
     _, ch = run(Scenario.default(20), reopen=[left])
     [i] = closed(ch)
     assert "agent_restarted" in i.tags and i.end_ms == T0
+
+
+def test_r5_not_suppressed_by_background_loss():
+    s = Scenario.default(120, mode="precision").event("idle_state_lost", 60, interval_s=600, waited_s=605)
+    s.fail(50, 65, probes={"udp_stream"}, frac=0.1)    # 1 in 10 lost: ordinary loss, not an outage
+    _, ch = run(s)
+    assert [i.point for i in closed(ch)] == ["idle_state_lost"]
+
+
+def test_incident_open_across_sleep_ends_when_the_sleep_began():
+    s = Scenario.default(400).internet_down(30, 55).suspend(55, 300).event("suspend", 300, slept_s=245)
+    _, ch = run(s)
+    [i] = closed(ch)
+    assert sec(i.end_ms) == 55 and "host_slept" in i.tags and "long_outage" not in i.tags

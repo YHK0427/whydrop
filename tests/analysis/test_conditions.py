@@ -91,3 +91,12 @@ def test_wifi_lan_loss():
     s = Scenario.default(300).fail(50, 250, probes={"gateway"}, frac=0.2)
     _, ch = run(s)
     assert periods(ch, "wifi_lan_loss")[0][1] == "start"
+
+
+def test_weak_signal_with_sparse_wifi_rows():
+    s = Scenario.default(5000)
+    s.streams = [x for x in s.streams if x.probe != "wifi"]
+    s.add("wifi", "wifi", None, every_s=2)                 # Windows reads Wi-Fi every 2 s
+    frames = with_signal(s.frames(), lambda i: -60 if i < 4000 else -80)
+    _, ch = run(s, frames)
+    assert [x[1] for x in periods(ch, "weak_signal")] == ["start"]

@@ -36,6 +36,7 @@ class IncidentChange:
     op: str                    # "open" | "update" | "close" | "finding"
     incident: Incident | None
     kind: str | None = None
+    ts_ms: int | None = None
 
 
 class Incidents:
@@ -86,11 +87,21 @@ class Incidents:
         while self._recent and self._recent[0].ts_ms < t - 120_000:
             self._recent.popleft()
         for (p, _), r in frame.samples.items():
-            if r.lost or r.late:
+            judged = r.sent - r.local_fail
+            if p == "udp_stream":
+                if judged > 0 and (r.lost + r.late) >= K.STREAM_LOSS_FRAC * judged:
+                    self._loss.append((t, p))       # an outage on the stream, not background loss
+            elif r.lost or r.late:
                 self._loss.append((t, p))
         while self._loss and self._loss[0][0] < t - 120_000:
             self._loss.popleft()
 
+        for e in frame.events:
+            if e.kind == "suspend" and self.current is not None:
+                slept_at = e.ts_ms - int(e.detail.get("slept_s", 0) * 1000)
+                self.current.tags.add("host_slept")
+                self.current.open_segments.clear()
+                self._close(self.current, max(self.current.start_ms, slept_at), out)
         live = self.current
         for e in frame.events:
             if live is not None and e.kind in EVIDENCE_EVENTS:
@@ -173,7 +184,7 @@ class Incidents:
                     continue                             # the hot paths lost too: part of a wider problem
                 interval = e.detail.get("interval_s")
                 if interval in self._idle_seen:
-                    out.append(IncidentChange("finding", None, "idle_expiry_repeat"))
+                    out.append(IncidentChange("finding", None, "idle_expiry_repeat", e.ts_ms))
                     continue
                 self._idle_seen.add(interval)
                 self._point("idle_state_lost", e.ts_ms, out, interval_s=interval)

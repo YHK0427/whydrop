@@ -10,6 +10,7 @@ TIMEOUT_S = {"line_hb": 1.0, "stun": 1.0, "dns": 2.0, "dns_tcp": 3.0, "tcp_conne
              "udp_stream": 2.0, "canary": 3.0}
 
 # segments (§6.2)
+LOCAL_STALE_S = 60               # a down local segment whose probe stopped reporting this long is unknown again
 LOCAL_HOLD_S = 3                 # host_net / wifi / link: down after, and recovered after, 3 s held
 LAN_MISSES = 2                   # consecutive gateway non-replies
 LINE_LOOKBACK_S = 3              # every line-quorum send in [T-3 s, T-timeout] failed

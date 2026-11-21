@@ -149,7 +149,8 @@ def test_router_dns_without_isp_known_says_upstream():
 
 
 def test_unobservable_lan_line_drop_label():
-    _, finals, _, _ = run(Scenario.default(200).internet_down(30, 40), lan_observable=False)
+    s = Scenario.default(200).internet_down(30, 40).fail(0, 200, probes={"gateway"})  # the router never answers
+    _, finals, _, _ = run(s, lan_observable=False)
     assert finals[0].cause.rule == "R2" and "can't separate" in finals[0].cause.label
 
 

@@ -172,6 +172,9 @@ def _annotate(args: argparse.Namespace) -> int:
     except (ConfigError, ValueError) as e:
         print(f"whydrop: {e}", file=sys.stderr)
         return 2
+    if not cfg.db_path.exists():
+        print(f"whydrop: no database at {cfg.db_path} (is db_path right?)", file=sys.stderr)
+        return 2
     if end is not None and end < start:
         print("whydrop: --end is before --start", file=sys.stderr)
         return 2
@@ -215,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     an = sub.add_parser("annotate", help="label a scene (reproduced / injected / user-test)")
     an.add_argument("--config", type=Path, default=None)
     an.add_argument("--label", required=True, choices=("reproduced", "injected", "user-test"))
-    an.add_argument("--start", required=True, help="ISO time")
+    an.add_argument("--start", required=True, help="ISO time; add the offset (e.g. +09:00) inside containers")
     an.add_argument("--end", default=None, help="ISO time")
     an.add_argument("--note", default=None)
     try:

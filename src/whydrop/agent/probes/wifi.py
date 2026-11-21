@@ -153,11 +153,11 @@ class LinuxWifi:
         self._misses = 0
         self.iw_missing = False
 
-    async def snapshot(self) -> Snapshot:
+    async def snapshot(self) -> Snapshot | None:
         try:
             up = (self._sys / "operstate").read_text().strip() == "up"
         except OSError:
-            up = False
+            return None  # no such interface (or unreadable): no evidence, not "down"
         try:
             signal = parse_proc_wireless(self._proc.read_text(), self.iface)
         except OSError:
@@ -185,11 +185,11 @@ class LinuxWifi:
 
 
 class WindowsWifi:
-    async def snapshot(self) -> Snapshot:
+    async def snapshot(self) -> Snapshot | None:
         try:
             d = parse_netsh(await _run("netsh", "wlan", "show", "interfaces"))
         except (OSError, asyncio.TimeoutError):
-            d = {"connected": False}
+            return None  # netsh failed or timed out: no evidence, not "disconnected"
         return Snapshot(d["connected"], d.get("bssid") if d["connected"] else None, None,
                         float(d["rssi_dbm"]) if "rssi_dbm" in d else None, None, d.get("band"))
 

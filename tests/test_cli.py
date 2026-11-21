@@ -79,9 +79,19 @@ def test_annotate_inserts_label(monkeypatch, tmp_path):
     import sqlite3
     monkeypatch.setenv("WHYDROP_DB_PATH", str(tmp_path / "w.db"))
     monkeypatch.chdir(tmp_path)
+    assert main(["annotate", "--label", "reproduced", "--start", "2026-11-25T14:00:00+09:00"]) == 2  # no DB yet
+    _db_with_drop(tmp_path / "w.db")
     assert main(["annotate", "--label", "reproduced", "--start", "2026-11-25T14:00:00+09:00",
                  "--end", "2026-11-25T14:01:00+09:00", "--note", "router reboot"]) == 0
     con = sqlite3.connect(tmp_path / "w.db")
     assert con.execute("select label, note, end_ms - start_ms from annotations").fetchall() == [("reproduced", "router reboot", 60000)]
     con.close()
     assert main(["annotate", "--label", "bogus", "--start", "2026-11-25T14:00:00"]) == 2
+
+
+def test_replay_in_chunks_matches_one_pass(tmp_path, monkeypatch):
+    from whydrop.analysis import replay as rp
+    _db_with_drop(tmp_path / "w.db")
+    whole = rp.summary(rp.replay(tmp_path / "w.db"))
+    monkeypatch.setattr(rp, "CHUNK_MS", 40_000)
+    assert rp.summary(rp.replay(tmp_path / "w.db")) == whole and len(whole) == 1

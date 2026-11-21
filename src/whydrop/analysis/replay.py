@@ -19,36 +19,47 @@ def context_from_db(con: sqlite3.Connection) -> Context:
     return Context(provider_of=prov.get, excluded_pairs=set(excl.get("pairs", [])),
                    excluded_providers=set(excl.get("providers", [])), mode=tags.get("mode", "basic"),
                    lan_observable=ctx_meta.get("lan_observable", True), vpn=ctx_meta.get("vpn", False),
-                   link_kind=ctx_meta.get("link_kind", "unknown"), intervals=ctx_meta.get("intervals", {"dns": 5}))
+                   link_kind=ctx_meta.get("link_kind", "unknown"), intervals=ctx_meta.get("intervals", {"dns": 5}),
+                   isp_dns_known=ctx_meta.get("isp_dns_known", True), nat_tcp_timeout_s=_nat_tcp_lower(con))
+
+
+def _nat_tcp_lower(con) -> int | None:
+    row = con.execute("SELECT detail_json FROM nat_runs ORDER BY id DESC LIMIT 1").fetchone()
+    lo = (json.loads(row[0] or "{}").get("tcp_range") or [None])[0] if row else None
+    return int(lo) if lo is not None else None
+
+
+CHUNK_MS = 3_600_000   # read an hour at a time: a week of 1 s rows doesn't fit in 128 MB
 
 
 def replay(db: Path, from_ms: int | None = None, to_ms: int | None = None) -> list:
-    """Returns the engine changes; closed incidents carry their final causes."""
+    """Returns the engine changes; closed incidents carry their final causes. Reads the DB in hourly chunks."""
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         ctx = context_from_db(con)
-        lo, hi = from_ms if from_ms is not None else 0, to_ms if to_ms is not None else 2 ** 62
-        fb = FrameBuilder(finalize_lag_ms=0)
-        rows = con.execute(f"SELECT {_SAMPLE_COLS} FROM samples_1s WHERE ts_ms BETWEEN ? AND ? ORDER BY ts_ms",
-                           (lo, hi)).fetchall()
-        events = con.execute("SELECT ts_ms, kind, pair, detail_json FROM events WHERE ts_ms BETWEEN ? AND ? ORDER BY ts_ms",
-                             (lo, hi)).fetchall()
+        lo_hi = con.execute("SELECT MIN(ts_ms), MAX(ts_ms) FROM samples_1s WHERE ts_ms BETWEEN ? AND ?",
+                            (from_ms if from_ms is not None else 0, to_ms if to_ms is not None else 2 ** 62)).fetchone()
+        if lo_hi[0] is None:
+            return []
+        hi = lo_hi[1]
+        lo = max(lo_hi[0], hi - 8 * 86_400_000)   # 1 s data lives 7 days: anything older is a bad timestamp
+        fb, eng, out = FrameBuilder(finalize_lag_ms=0), Engine(ctx), []
+        fb.next_ms = con.execute("SELECT MIN(ts_ms) FROM samples_1s WHERE ts_ms >= ?", (lo,)).fetchone()[0] // 1000 * 1000
+        start = fb.next_ms
+        while start <= hi:
+            stop = min(start + CHUNK_MS, hi + 1)
+            fb.add_events([Event(k, t, p, json.loads(d or "{}")) for t, k, p, d in con.execute(
+                "SELECT ts_ms, kind, pair, detail_json FROM events WHERE ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms",
+                (start, stop))])
+            fb.add_rows([SampleRow(*r) for r in con.execute(
+                f"SELECT {_SAMPLE_COLS} FROM samples_1s WHERE ts_ms >= ? AND ts_ms < ? ORDER BY ts_ms", (start, stop))])
+            last_chunk = stop > hi
+            for f in fb.ready(stop + 200_000 if last_chunk else stop - 30_000):  # 30 s of slack at each seam
+                out += [c for c in eng.step(f) if c.type in ("incident", "final", "condition", "finding")]
+            start = stop
+        return out
     finally:
         con.close()
-    if rows:
-        horizon = rows[-1][0] - 8 * 86_400_000   # 1 s data lives 7 days: anything older is a bad timestamp
-        rows = [r for r in rows if r[0] >= horizon]
-        events = [e for e in events if e[0] >= horizon]
-    if not rows:
-        return []
-    fb.next_ms = rows[0][0] // 1000 * 1000
-    fb.add_events([Event(k, t, p, json.loads(d or "{}")) for t, k, p, d in events])
-    fb.add_rows([SampleRow(*r) for r in rows])
-    eng, out = Engine(ctx), []
-    last = rows[-1][0] + 200_000            # run on past the end so open incidents settle
-    for f in fb.ready(last):
-        out += eng.step(f)
-    return out
 
 
 def summary(changes) -> list[dict]:
