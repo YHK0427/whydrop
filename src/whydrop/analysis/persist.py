@@ -19,8 +19,9 @@ def _evidence(inc: Incident, cause) -> str:
 
 
 class Recorder:
-    def __init__(self, store, on_incident=None):
+    def __init__(self, store, on_incident=None, bus=None):
         self.store = store
+        self.bus = bus
         self.rows: dict[int, int] = {}          # incident key → incidents.id
         self._conds: dict[str, int] = {}
         self._findings: set[str] = set()
@@ -66,24 +67,38 @@ class Recorder:
             out.append(inc)
         return out
 
+    def _pub(self, type_: str, row: dict, op: str | None = None) -> None:
+        if self.bus is not None:
+            self.bus.publish(type_, {"op": op, "row": row})
+
+    def _incident_row(self, inc: Incident, cause, rid) -> dict:
+        return {"id": rid, "start_ms": inc.start_ms, "end_ms": inc.end_ms, "primary_cause": cause.rule if cause else None,
+                "tags_json": _tags(inc), "evidence_json": _evidence(inc, cause)}
+
     async def write(self, changes) -> None:
         for ch in changes:
             if ch.type == "segment":
                 c = ch.obj
                 await self.store.insert("segments", ts_ms=c.t_ms, segment=c.segment, state=c.state,
                                         detail_json=json.dumps(c.detail))
+                self._pub("segment", {"ts_ms": c.t_ms, "segment": c.segment, "state": c.state,
+                                      "detail_json": json.dumps(c.detail)})
             elif ch.type == "condition":
                 c = ch.obj
                 if c.phase == "start":
                     d = dict(c.detail, **({"cause": ch.cause.rule, "label": ch.cause.label} if ch.cause else {}))
                     self._conds[c.kind] = await self.store.insert("conditions", kind=c.kind, start_ms=c.t_ms,
                                                                   detail_json=json.dumps(d))
+                    self._pub("condition", {"kind": c.kind, "start_ms": c.t_ms, "end_ms": None,
+                                            "detail_json": json.dumps(d)}, "start")
                 elif c.kind in self._conds:
                     await self.store.execute("UPDATE conditions SET end_ms = ? WHERE id = ?", (c.t_ms, self._conds.pop(c.kind)))
+                    self._pub("condition", {"kind": c.kind, "end_ms": c.t_ms, "detail_json": "{}"}, "end")
             elif ch.type == "finding":
                 if ch.obj.kind not in self._findings:  # a standing finding: once, not once per repeat
                     self._findings.add(ch.obj.kind)
                     await self.store.insert("findings", kind=ch.obj.kind, start_ms=ch.obj.ts_ms or 0, detail_json="{}")
+                    self._pub("finding", {"kind": ch.obj.kind, "start_ms": ch.obj.ts_ms or 0})
             elif ch.type == "incident":
                 inc, op = ch.obj.incident, ch.obj.op
                 rid = self.rows.get(inc.key)
@@ -96,6 +111,8 @@ class Recorder:
                                              "evidence_json=? WHERE id=?", (inc.start_ms, inc.end_ms, ch.cause.rule,
                                                                             _tags(inc), _evidence(inc, ch.cause), rid))
                 self.on_incident(op, inc)
+                self._pub("incident", self._incident_row(inc, ch.cause, self.rows[inc.key]),
+                          "created" if rid is None else "updated")
             elif ch.type == "final":
                 f = ch.obj
                 rid = self.rows.pop(f.incident.key, None)
@@ -103,3 +120,5 @@ class Recorder:
                     await self.store.execute("UPDATE incidents SET cause_final=?, cause_changed=?, primary_cause=?, "
                                              "evidence_json=? WHERE id=?",
                                              (f.cause.rule, int(f.changed), f.cause.rule, _evidence(f.incident, f.cause), rid))
+                    row = self._incident_row(f.incident, f.cause, rid)
+                    self._pub("incident", {**row, "cause_final": f.cause.rule, "cause_changed": int(f.changed)}, "finalized")

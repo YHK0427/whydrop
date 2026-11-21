@@ -370,7 +370,7 @@ def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_p
     async def no_link():
         return None
     monkeypatch.setattr(runmod.Agent, "job_link_layer", lambda self: no_link())  # CI runners have a real /sys link
-    run_for(cfg, 19)
+    run_for(cfg, 25)  # roomy: under a loaded CI runner the 6.5 s finalize lag plus the drop needs time
     rows = db(cfg, "select start_ms, primary_cause, evidence_json, tags_json from incidents")
     assert len(rows) == 1 and rows[0][1] == "R2" and "likely" in json.loads(rows[0][2])["label"]
     assert json.loads(rows[0][3])["segments"] == ["line"]
@@ -395,3 +395,72 @@ def test_packet_strip_saved_around_incident(fakes, tmp_path):
         await agent.store.close()
     asyncio.run(go())
     assert db(cfg, "select seq, echoed, dir from udp_seq_ring order by seq") == [(7, 1, "ok"), (8, 0, "up")]
+
+
+
+def test_dashboard_served_while_recording(fakes, monkeypatch):
+    import socket
+    import urllib.request
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, web=replace(cfg.web, bind=f"127.0.0.1:{port}"))
+    got = {}
+
+    async def go():
+        stop = asyncio.Event()
+        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        await asyncio.sleep(2.0)
+        got["health"] = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3).read())
+        got["status"] = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=3).read()))
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    asyncio.run(go())
+    assert got["health"] == b'{"ok":true}' and got["status"]["mode"] == "basic"
+
+
+
+def test_alert_sent_for_finalized_drop_through_the_agent(fakes, monkeypatch):
+    from whydrop.agent import notify
+    sent = []
+    monkeypatch.setattr(notify, "_post", lambda url, body, headers: sent.append(json.loads(body)))
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, notify={"webhook_url": "http://127.0.0.1:9/hook", "format": "json"})
+
+    async def go():
+        stop = asyncio.Event()
+        agent = runmod.Agent(cfg, stop)
+        task = asyncio.create_task(agent.run())
+        await asyncio.sleep(1.5)
+        agent.bus.publish("incident", {"op": "finalized", "row": {
+            "id": 1, "start_ms": 0, "end_ms": 5000, "primary_cause": "R2", "cause_final": "R2",
+            "tags_json": json.dumps({"segments": ["line"]}), "evidence_json": json.dumps({"label": "Line drop (likely)"})}})
+        await asyncio.sleep(0.5)
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    asyncio.run(go())
+    assert [m["drop"]["cause"] for m in sent] == ["R2"]
+
+
+
+def test_dashboard_port_in_use_does_not_stop_recording(fakes, caplog):
+    import socket
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen()
+    port = busy.getsockname()[1]
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, web=replace(cfg.web, bind=f"127.0.0.1:{port}"))
+    try:
+        run_for(cfg, 2.0)
+    finally:
+        busy.close()
+    assert db(cfg, "select count(*) from samples_1s where probe = 'gateway'")[0][0] >= 1
+    assert "dashboard off: can't listen" in caplog.text  # refused cleanly, not stolen (Windows SO_REUSEADDR) or exit()

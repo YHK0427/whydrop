@@ -93,12 +93,22 @@ class Agent:
         self._canaries: list[asyncio.Task] = []
         self._providers: dict[str, str] = {}
         self._nat_tcp_lower: int | None = None
+        self._signal_dbm = None
+        self._run_started_ms = None
+        self._web = None
+        self._web_task = None
+        self._nat_task: asyncio.Task | None = None
+        self.notifier = None
+        self._nat_progress: dict | None = None
         self._gw_seen = False
         self.fb = FrameBuilder()
         self.engine: Engine | None = None
-        self.recorder = Recorder(self.store, on_incident=self._strip)
+        from whydrop.web.bus import Bus   # stdlib only: the bus exists even without the web extra
+        self.bus = Bus()
+        self.recorder = Recorder(self.store, on_incident=self._strip, bus=self.bus)
         self._started = None
         self.store.listeners.append(lambda rows, events: (self.fb.add_rows(rows), self.fb.add_events(events)))
+        self.store.listeners.append(self._publish_recorded)
         self.store.late_listeners.append(self.fb.add_late)
 
     # ---------- helpers ----------
@@ -129,6 +139,8 @@ class Agent:
                     self._providers[x.pair] = x.provider
                 if x.probe == "gateway" and x.ok:
                     self._gw_seen = True
+                if x.probe == "wifi":
+                    self._signal_dbm = x.detail.get("signal_dbm")
                 if x.ok and x.probe in ("line_hb", "tcp_connect", "stun"):  # basic external probes
                     self._line_ok_ms = self.now()
             else:
@@ -512,6 +524,135 @@ class Agent:
                 "INSERT OR IGNORE INTO udp_seq_ring (agent_id, ts_ms, seq, echoed, dir) VALUES (?, ?, ?, ?, ?)",
                 [(self.store.agent_id, t, q, int(e), d) for t, q, e, d in rows if q >= 0]), "packet strip")
 
+    # ---------- alerts ----------
+    async def start_notify(self) -> None:
+        from whydrop.agent.notify import Notifier
+        self.notifier = Notifier(dict(self.cfg.notify), self.now,
+                                 on_queue=lambda q: self.spawn(self.store.meta_set("notify_queue", json.dumps(q)),
+                                                               "alert queue"))
+        if not (self.notifier.enabled or self.notifier.kuma):
+            return
+        self.notifier.queue = json.loads(await self.store.meta_get("notify_queue") or "[]")  # survives restarts
+        if self.notifier.enabled:
+            self.spawn(self.notifier.run(self.bus, self.stop), "alerts")
+        if self.notifier.kuma:
+            self.sched.every("kuma", 60.0, self.notifier.kuma_push, phase_s=5)
+
+    # ---------- dashboard ----------
+    def _publish_recorded(self, rows, events) -> None:
+        # samples are not pushed one by one (≈ 11/s per browser for nothing): the charts re-fetch /api/chart
+        for e in events:
+            if e.kind != "tcp_info":
+                self.bus.publish("event", {"row": {"ts_ms": e.ts_ms, "kind": e.kind, "pair": e.pair,
+                                                     "detail_json": json.dumps(e.detail)}})
+
+    def status(self) -> dict:
+        from whydrop.agent import traffic
+        return {"version": __version__, "mode": self.tags.get("mode"), "agent": self.cfg.agent_name,
+                "reflector": None if not self.precision else {"hot": self.hot.state if self.hot else None,
+                                                              "stream_ok": bool(self.stream and self.stream.last_echo_ms)},
+                "bytes": dict(traffic.BYTES), "baseline": self.engine.cond.baseline_state(self.now()) if self.engine else "none",
+                "now_ms": self.now(), "segments": self._segment_states(), "signal_dbm": self._signal_dbm,
+                "link": self.env.link if self.env else "unknown", "vpn": bool(self.env and self.env.egress_vpn),
+                "since_ms": self._run_started_ms, "analysis_lag_s": 14}
+
+    def _segment_states(self) -> dict:
+        """What the path diagram shows: ok / down / unknown / unobservable / checking per hop."""
+        if self.engine is None:
+            return {s: "checking" for s in ("host_net", "wifi", "link", "lan", "line", "dns")}
+        seg = self.engine.seg
+        out = {s: seg.state(s) for s in ("host_net", "wifi", "link", "lan", "line")}
+        dns = [seg.state(c) for c in ("dns_router", "dns_isp", "dns_public")]
+        out["dns"] = "down" if "down" in dns else "up" if "up" in dns else "unknown"
+        return out
+
+    def web_nat_run(self) -> bool:
+        """POST /api/nat/run: False while one is already running (→ 409)."""
+        if self._nat_task is not None and not self._nat_task.done():
+            return False
+        self._nat_task = self.spawn(self._run_nat(), "nat-test")
+        return True
+
+    async def _run_nat(self) -> None:
+        from whydrop.agent.precision import natprobe
+        secret, start = load_secret(os.environ, required=True), self.now()
+        self._nat_progress = {"done": 0, "total": len(natprobe.UDP_DELAYS) + len(natprobe.TCP_DELAYS), "last": None}
+
+        def progress(r):
+            self._nat_progress["done"] += 1
+            self._nat_progress["last"] = {"proto": r.proto, "delay_s": r.delay_s, "alive": r.alive}
+        try:
+            rep = await natprobe.nat_test(reflector_addr(self.cfg), secret, on_progress=progress)
+            await natprobe.store_report(self.store, rep, start_ms=start, end_ms=self.now())
+            self._nat_tcp_lower = rep.tcp_range[0]
+            if self.engine is not None:
+                self.engine.ctx.nat_tcp_timeout_s = rep.tcp_range[0]
+        finally:
+            self._nat_progress = None
+
+    async def start_web(self) -> None:
+        try:
+            import contextlib
+            import importlib
+
+            # FastAPI takes ~1.5 s to import: do it off the event loop so probes never wait for the dashboard
+            await asyncio.to_thread(importlib.import_module, "whydrop.web.app")
+            import uvicorn
+
+            from whydrop.web.app import create_app
+            from whydrop.web.guard import LOOPBACK, allowed_hosts, resolve_token
+        except ImportError:
+            log.info("dashboard off: install whydrop[web] to get it")
+            return
+        host, _, port = self.cfg.web.bind.rpartition(":")
+        host = host.strip("[]") or "127.0.0.1"
+        generated = host not in LOOPBACK and not os.environ.get("WHYDROP_UI_TOKEN") \
+            and not (self.cfg.db_path.parent / "ui-token").exists()
+        try:
+            token = resolve_token(host, os.environ, self.cfg.db_path.parent)
+        except ValueError as e:
+            log.error("dashboard off: %s", e)
+            return
+        app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts) + [
+                             h.strip() for h in os.environ.get("WHYDROP_WEB_ALLOWED_HOSTS", "").split(",") if h.strip()]),
+                         public_default=self.cfg.web.public_view_default, status=self.status,
+                         nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress,
+                         packets=lambda: list(self.stream.packets) if self.stream else [])
+        import socket as _socket
+        try:  # bind ourselves: uvicorn's own bind failure calls sys.exit, which would take the agent down
+            fam = _socket.AF_INET6 if ":" in host else _socket.AF_INET
+            sock = _socket.socket(fam, _socket.SOCK_STREAM)
+            if sys.platform != "win32":
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            sock.bind((host, int(port)))
+        except (OSError, ValueError) as e:
+            log.error("dashboard off: can't listen on %s:%s (%s); recording continues", host, port,
+                      getattr(e, "strerror", None) or e)
+            return
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off",
+                                               ws="websockets-sansio", timeout_graceful_shutdown=3))
+        server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
+        self._web = server
+
+        async def serve():
+            try:
+                await server.serve(sockets=[sock])
+            except SystemExit:
+                log.error("dashboard stopped unexpectedly; recording continues")
+            finally:
+                sock.close()
+        self._web_task = self.spawn(serve(), "dashboard")
+        if host in LOOPBACK:
+            log.info("dashboard: http://%s:%s/", host, port)
+        else:
+            from whydrop.agent.probes import host_net
+            where = host_net.source_address() or ("<this machine's address>" if host in ("0.0.0.0", "::") else host)
+            if generated:  # the Jupyter way: shown once, when it is made (it is kept in the data volume)
+                log.warning("dashboard: http://%s:%s/?token=%s", where, port, token)
+            else:
+                log.info("dashboard: http://%s:%s/?token=<your token> (WHYDROP_UI_TOKEN or ui-token in the data dir)",
+                         where, port)
+
     # ---------- main ----------
     async def wait_route(self) -> bool:
         for _ in range(ROUTE_WAIT_S):
@@ -581,6 +722,7 @@ class Agent:
         self.tags["mode"] = "precision" if self.precision else "basic"
         if why_not and self.cfg.reflector:
             log.warning("precision mode off: %s", why_not)
+        self._run_started_ms = self.now()
         self.run_id = await self.store.run_start(self.now(), __version__, self.tags)
         await self.vpn_finding()
         # one bounded pass inline; if it can't decide (e.g. started mid-outage), keep retrying in the background
@@ -590,6 +732,8 @@ class Agent:
         elif await self.selfcheck() != "ok":
             self.start_selfcheck(after_failed=True)
         self.schedule()
+        self.spawn(self.start_web(), "dashboard start")
+        await self.start_notify()
         if self.precision:
             await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now,
@@ -604,6 +748,10 @@ class Agent:
         await asyncio.gather(self.sched.run(self.stop), watchdog.run(self.stop))
 
     async def _shutdown(self) -> None:
+        if self._web is not None:
+            self._web.should_exit = True
+            if self._web_task is not None:
+                await asyncio.gather(self._web_task, return_exceptions=True)
         for t in self._canaries:  # first, so their last events (stall end) land before the store closes
             t.cancel()
         await asyncio.gather(*self._canaries, return_exceptions=True)
@@ -619,6 +767,8 @@ class Agent:
             steps.append(lambda: self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels)))
         if self.agg:
             steps.append(lambda: self.agg.flush_ready(force=True))
+        if self.notifier is not None and (self.notifier.queue or self.notifier.enabled):
+            steps.append(lambda: self.store.meta_set("notify_queue", json.dumps(self.notifier.queue)))
         if self.run_id is not None:
             steps.append(self.save_analysis_meta)
             steps.append(lambda: self.store.run_stop(self.run_id, self.now()))

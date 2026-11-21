@@ -26,9 +26,10 @@ def test_compose_forbidden():
         assert bad not in BODY, bad
 
 
-def test_only_two_mounts():
-    mounts = [line for line in LINES if re.match(r"^\s+- [^ ]+:[^ ]+", line) and "volumes" not in line]
-    assert len(mounts) == 2
+def test_only_the_expected_mounts():
+    mounts = [line.strip() for line in LINES if re.match(r"^\s+- [^ ]+:[^ ]+", line) and "volumes" not in line]
+    assert mounts == ["- whydrop-data:/data", "- /run/systemd/resolve:/run/systemd/resolve:ro",
+                      "- /etc/localtime:/etc/localtime:ro"]   # data, DNS config, time zone; nothing writable from the host
 
 
 def test_dockerfile_runs_as_10001_and_pins_base():

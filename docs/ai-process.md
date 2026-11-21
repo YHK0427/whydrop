@@ -62,7 +62,15 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Reviews | One batch review, one whole-branch review by the most capable model, and two rounds of re-review on the fixes. Faults found before deployment, among them: a Wi-Fi probe that could not read its interface counted as "Wi-Fi down", which would have opened a drop that never ends and switched off line detection; a drop open when the laptop went to sleep would have lasted the whole night; Windows timer steps (15.6 ms) would have marked the host as permanently busy; a reflector outage would have been reported as a lossy ISP line; one fix crashed the agent at startup when `netsh` timed out | Merge after review |
 | A CI failure that pointed at a real bug | The Linux CI runner read its own network interface during a test and produced a false "cable problem". The test was fixed, and the reviewer then showed the same mistake would happen on real machines, which led to the fix above | — |
 
-Counts so far: 26 review agents, roughly 410 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-21 — Plan 5 built: the dashboard
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Build | 8 tasks: the web app served from the agent's own event loop with host, origin and token guards; a public-view allowlist used by every output; REST, exports and a change bus with WebSocket; webhook alerts on finalized drops; a static, no-build frontend (Now with the path diagram, drop detail with the packet strip and "in protocol terms", NAT, Protocol, My network) in English and Korean, light and dark | Designed earlier with the UI/UX skills and reference products; "keep going without asking" |
+| Checks in a real browser | Screenshots of every screen in both themes, both languages and two widths reviewed by eye; axe-core with zero serious violations; a full keyboard path; no sideways scroll on a 360 px phone in Korean; one run under the real Content-Security-Policy with a token | — |
+| Reviews | One batch review, one whole-branch review by the most capable model and two re-reviews. The reviewer measured, not guessed: chart requests stalled the agent's loop for 1.2–3 s and added 60–90 MB of memory (fixed: columnar charts, encoding off the loop, streamed exports; re-measured at under 10 ms and a few kB). Also caught: the reflector's address leaking through one probe's name in public view, a busy port letting the web server exit the whole agent, copy-to-clipboard failing on a LAN address, exports dying mid-stream on one table | Merge after review |
+
+Counts so far: 28 review agents, roughly 485 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.

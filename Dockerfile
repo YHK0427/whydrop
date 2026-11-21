@@ -9,9 +9,11 @@ RUN apt-get update \
  && mkdir -p /data && chown 10001:10001 /data
 
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md requirements-web.txt ./
 COPY src ./src
-RUN pip install --no-cache-dir . && rm -rf /root/.cache
+# web dependencies pinned with hashes (uv export), then whydrop itself without resolving anything else
+RUN pip install --no-cache-dir --require-hashes -r requirements-web.txt \
+ && pip install --no-cache-dir --no-deps . && rm -rf /root/.cache
 
 USER 10001
 ENV WHYDROP_DB_PATH=/data/whydrop.db PYTHONUNBUFFERED=1
