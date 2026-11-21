@@ -16,7 +16,7 @@ def pair_id(cls: str, addr: str, port: int, proto: str) -> str:
 def mask_pair(pair: str) -> str:
     """Router and ISP resolver addresses identify a home network; logs and reports show only the last octet."""
     cls, _, rest = pair.partition(":")
-    if cls in ("dns_router", "dns_isp", "gateway"):
+    if cls in ("dns_router", "dns_isp") and rest:
         addr, _, tail = rest.partition(":")
         return f"{cls}:x.x.x.{addr.rsplit('.', 1)[-1]}:{tail}"
     return pair

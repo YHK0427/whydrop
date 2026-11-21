@@ -150,3 +150,25 @@ def test_failed_flush_keeps_the_batch(tmp_path, monkeypatch):
     con = sqlite3.connect(tmp_path / "w.db")
     assert con.execute("select count(*) from samples_1s").fetchone()[0] == 1
     con.close()
+
+
+def test_buffer_is_capped_when_sqlite_keeps_failing(tmp_path, monkeypatch):
+    import whydrop.agent.store as st
+    monkeypatch.setattr(st, "MAX_BUFFERED", 100)
+
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+
+        def boom(*a):
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+        s._flush_sync = boom
+        for i in range(5):
+            await s.add_samples([SampleRow(i * 1000 + j, "dns", "p", 1, 1, 0) for j in range(60)])
+            with pytest.raises(sqlite3.OperationalError):
+                await s.flush()
+        n = len(s._samples)
+        s._flush_sync = lambda *a: None
+        await s.close()
+        return n
+    assert run(main()) == 100

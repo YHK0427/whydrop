@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from whydrop.agent.probes import host_net
+from whydrop.agent.proc import run_cmd
 
 VM_MESSAGE = ("This measures a VM's network, not yours. Run it on a Linux host, or natively on Windows with "
               "`pipx install whydrop` (not inside WSL2).")
@@ -86,9 +87,7 @@ async def _egress_iface() -> str | None:
     if not sys.platform.startswith("linux"):
         return None
     try:
-        proc = await asyncio.create_subprocess_exec("ip", "-o", "-4", "route", "get", "8.8.8.8",
-                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        out, _ = await asyncio.wait_for(proc.communicate(), 3)
+        out = await run_cmd("ip", "-o", "-4", "route", "get", "8.8.8.8", timeout_s=3)
         return parse_ip_route_get(out.decode("ascii", "replace"))
     except (OSError, asyncio.TimeoutError):
         return None

@@ -163,4 +163,29 @@ def _build(raw: dict, env: Mapping[str, str]) -> Config:
             flat[key] = Path(env[var]) if key == "db_path" else env[var]
     if env.get("WHYDROP_WEB_BIND"):
         flat["web"] = replace(flat.get("web", c.web), bind=env["WHYDROP_WEB_BIND"])
-    return replace(c, **flat)
+    c = replace(c, **flat)
+    _check_addresses(c)
+    return c
+
+
+def _ipv4(v, key: str) -> None:
+    import ipaddress
+    try:
+        ipaddress.IPv4Address(v)
+    except (ValueError, TypeError):
+        raise ConfigError(f"{key} must be an IPv4 address, got {v!r}") from None
+
+
+def _check_addresses(c: "Config") -> None:
+    if not isinstance(c.agent_name, str) or not c.agent_name:
+        raise ConfigError("agent_name must be a non-empty string")
+    for key in ("gateway", "router_dns"):
+        if getattr(c, key) is not None:
+            _ipv4(getattr(c, key), key)
+    for a in c.isp_dns:
+        _ipv4(a, "isp_dns")
+    if c.gateway_port is not None and not (isinstance(c.gateway_port, int) and 0 < c.gateway_port < 65536):
+        raise ConfigError("gateway_port must be 1–65535")
+    for i, t in enumerate(c.targets):
+        if t.kind != "stun":  # STUN servers may be hostnames; DNS and TCP targets are probed by address
+            _ipv4(t.addr, f"targets[{i}].addr")

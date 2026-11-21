@@ -32,9 +32,10 @@ class TimeBase:
         self._anchor_wall, self._anchor_mono = w, m
 
     def rebase(self) -> None:
-        """Forget the gap since the last check (call right before ticking starts, so startup work isn't
-        mistaken for a suspend)."""
+        """Start fresh right before ticking starts: startup work isn't a suspend, and a clock step that
+        happened during startup (NTP at boot) becomes the new anchor."""
         self._last_wall, self._last_mono = self._wall(), self._mono()
+        self._anchor(self._last_wall, self._last_mono)
         if self._boot:
             self._last_gap = self._boot() - self._last_mono
 

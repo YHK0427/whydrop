@@ -62,6 +62,7 @@ _UPSERT = (f"INSERT INTO samples_1s (agent_id, {_SAMPLE_COLS}) VALUES ({', '.joi
            "rtt_max = MAX(COALESCE(rtt_max, excluded.rtt_max), COALESCE(excluded.rtt_max, rtt_max)), "
            "rtt_p95 = MAX(COALESCE(rtt_p95, excluded.rtt_p95), COALESCE(excluded.rtt_p95, rtt_p95)), "
            "extra_json = COALESCE(excluded.extra_json, extra_json)")
+MAX_BUFFERED = 30_000
 _INSERTABLE = {"segments", "incidents", "conditions", "selfcheck", "findings", "nat_runs", "nat_results",
                "annotations", "udp_seq_ring"}
 
@@ -140,7 +141,9 @@ class Store:
         try:
             await self._db(self._flush_sync, samples, events)
         except sqlite3.Error:
-            self._samples, self._events = samples + self._samples, events + self._events  # retry next flush
+            # retry next flush, but never hold more than ~10 minutes of rows (128 MB container limit)
+            self._samples = (samples + self._samples)[-MAX_BUFFERED:]
+            self._events = (events + self._events)[-MAX_BUFFERED:]
             raise
 
     async def late(self, ts_ms: int, probe: str, pair: str) -> None:

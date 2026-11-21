@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from whydrop.agent.events import Event
+from whydrop.agent.proc import run_cmd
 from whydrop.agent.results import Result
 
 IW_EVERY_S = 10.0
@@ -132,9 +133,7 @@ class WifiTracker:
 
 
 async def _run(*args: str) -> str:
-    proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.DEVNULL)
-    out, _ = await asyncio.wait_for(proc.communicate(), 5)
+    out = await run_cmd(*args, timeout_s=5)
     for enc in ("utf-8", "mbcs", "cp949"):
         try:
             return out.decode(enc)

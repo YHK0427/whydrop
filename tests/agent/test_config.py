@@ -86,3 +86,12 @@ def test_web_bind_env_targets_and_intervals(tmp_path):
     c = load_config(p, {"WHYDROP_WEB_BIND": "0.0.0.0:8790"})
     assert c.web.bind == "0.0.0.0:8790" and c.intervals["stun"] == 20.0 and c.intervals["gateway"] == 1.0
     assert [t.addr for t in c.targets] == ["9.9.9.9"]
+
+
+@pytest.mark.parametrize("toml", ["gateway = 'router.lan'\n", "isp_dns = ['dns.example']\n", "gateway_port = 70000\n",
+                                  "[[targets]]\naddr = 'dns.google'\nport = 53\nkind = 'dns'\nprovider = 'google'\n"])
+def test_addresses_must_be_ipv4(tmp_path, toml):
+    p = tmp_path / "w.toml"
+    p.write_text(toml)
+    with pytest.raises(ConfigError):
+        load_config(p, {})

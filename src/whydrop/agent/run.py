@@ -61,7 +61,11 @@ class Agent:
         self._bg: set[asyncio.Task] = set()
         self._sc_task: asyncio.Task | None = None
         self._sc_excluded: set[str] = set()   # exclusions the self-check owns (findings own the rest)
-        self._rot = {"line_hb": 0, "tcp": 0, "dns_tcp": 0, "dns": 0}
+        self._rot = {"line_hb": 0, "tcp": 0, "dns_tcp": 0, "dns": 0, "link": 0}
+        self._stun_key: tuple | None = None
+        self._ll_key: tuple | None = None
+        self.wifi_src = None
+        self.link_tracker = None
         self.run_id: int | None = None
 
     # ---------- helpers ----------
@@ -123,7 +127,10 @@ class Agent:
         return pairs
 
     async def selfcheck(self) -> str:
-        await self.targets.resolve()
+        try:
+            await asyncio.wait_for(self.targets.resolve(), 20)
+        except asyncio.TimeoutError:
+            log.warning("resolving STUN hostnames timed out")
         gw = self.env.gateway if self.env else None
         gw_probe = (lambda: gateway.probe(gw, self.cfg.gateway_port, self.now)) if gw else None
         try:
@@ -145,11 +152,15 @@ class Agent:
         return sc.status
 
     async def selfcheck_with_backoff(self) -> None:
-        for wait in (0, *BACKOFF_S):
+        """30 s → 5 min backoff, then every 5 min until a check can decide (spec §5.1)."""
+        attempt = 0
+        while not self.stop.is_set():
+            wait = 0 if attempt == 0 else BACKOFF_S[min(attempt - 1, len(BACKOFF_S) - 1)]
             if wait and await self.pause(wait):
                 return
-            if self.stop.is_set() or await self.selfcheck() == "ok":
+            if await self.selfcheck() == "ok":
                 return
+            attempt += 1
 
     def start_selfcheck(self) -> None:
         """Only one self-check loop at a time; a newer trigger replaces the running one."""
@@ -210,13 +221,22 @@ class Agent:
         if r and pair_id("dns_router", r, 53, "udp") not in self.targets.excluded:
             await self.record(await dns_probe.router_cache_check(r, self.now))
 
+    def stun_servers(self) -> tuple:
+        t = self.targets
+        return tuple((s.addr, t.addr(s.addr), s.port, s.provider) for s in t.by_kind("stun")
+                     if t.addr(s.addr) and s.provider not in t.excluded_providers
+                     and pair_id("line_hb", s.addr, s.port, "udp") not in t.excluded)
+
     async def job_stun(self):
-        servers = [(self.targets.addr(s.addr), s.port, s.provider) for s in self.targets.by_kind("stun")]
-        if not servers or not all(s[0] for s in servers):
-            return
-        if self.stun is None:
-            self.stun = StunWatcher(servers, self.now)
-        await self.record(await self.stun.probe())
+        servers = self.stun_servers()
+        if servers != self._stun_key:  # new IPs, an exclusion, or a network change: fresh sockets
+            old_ip = self.stun.public_ip if self.stun else None
+            if self.stun:
+                self.stun.close()
+            self.stun = StunWatcher(list(servers), self.now, public_ip=old_ip) if servers else None
+            self._stun_key = servers
+        if self.stun:
+            await self.record(await self.stun.probe())
 
     async def job_tcp(self):
         rot = self.targets.tcp_rotation()
@@ -228,14 +248,39 @@ class Agent:
     async def job_host_net(self):
         await self.record(await host_net.probe(self.now))
 
-    async def job_wifi(self):
-        snap = await self.wifi_src.snapshot()
-        events = self.wifi_tracker.update(snap)
-        await self.record([wifi.to_result(snap, self.wifi_tracker, self.now()), *events])
+    def link_layer(self) -> tuple | None:
+        e = self.env
+        if sys.platform == "win32":
+            return ("wifi", None)
+        if e and e.iface and e.link == "wifi":
+            return ("wifi", e.iface)
+        if e and e.iface and e.link == "wired":
+            return ("link", e.iface)
+        return None
 
-    async def job_link(self):
-        r, events = self.link_tracker.probe()
-        await self.record([r, *events])
+    async def job_link_layer(self):
+        """Wi-Fi or wired link, whichever the current interface is (re-read every tick, so starting
+        before DHCP or switching networks still gets recorded)."""
+        key = self.link_layer()
+        if key != self._ll_key:
+            self._ll_key = key
+            self.wifi_src = self.link_tracker = None
+            if key and key[0] == "wifi":
+                self.wifi_src = wifi.WindowsWifi() if key[1] is None else wifi.LinuxWifi(key[1])
+            elif key:
+                self.link_tracker = link.LinkTracker(key[1], now_ms=self.now)
+        tick = self._rot["link"]
+        self._rot["link"] += 1
+        if self.wifi_src is not None:
+            every = int(self.cfg.intervals["wifi_windows" if sys.platform == "win32" else "wifi"])
+            if tick % max(1, every):
+                return
+            snap = await self.wifi_src.snapshot()
+            events = self.wifi_tracker.update(snap)
+            await self.record([wifi.to_result(snap, self.wifi_tracker, self.now()), *events])
+        elif self.link_tracker is not None:
+            r, events = self.link_tracker.probe()
+            await self.record([r, *events])
 
     async def job_tick(self):
         events = self.tb.check()
@@ -246,7 +291,7 @@ class Agent:
         events = self.findings.check()
         for e in events:
             key = e.pair or e.detail.get("provider")
-            detail = json.dumps({"key": mask_pair(key) if key else None})
+            detail = json.dumps({"key": key})
             if e.detail.get("phase") == "start":
                 await self.store.insert("findings", kind=e.detail["kind"], start_ms=e.ts_ms, detail_json=detail)
             else:
@@ -258,6 +303,11 @@ class Agent:
 
     async def job_recheck(self):
         """Excluded pairs and providers get one fresh try every 10 minutes (spec §5.1)."""
+        if self.targets.unresolved():
+            try:
+                await asyncio.wait_for(self.targets.resolve(), 20)
+            except asyncio.TimeoutError:
+                pass
         ex, ex_prov = self.targets.excluded, self.targets.excluded_providers
         for cp in self.check_pairs():
             if cp.pair not in ex and cp.provider not in ex_prov:
@@ -267,7 +317,8 @@ class Agent:
             except Exception:
                 log.exception("re-check of %s failed", mask_pair(cp.pair))
                 continue
-            self.findings.feed(r)  # lets a target-specific or provider finding end
+            if r.ok:
+                self.findings.feed(r)  # lets a finding end; failures here would only invent new ones
             if r.ok and cp.pair in self._sc_excluded:
                 self._sc_excluded.discard(cp.pair)
                 self.targets.include(cp.pair)
@@ -295,6 +346,7 @@ class Agent:
             "gateway_changed": new.gateway != old.gateway, "iface": new.iface, "vpn": new.egress_vpn})])
         if new.egress_vpn != old.egress_vpn:
             await self.vpn_finding()
+        self._stun_key = None
         log.info("network changed; re-running self-check")
         self.start_selfcheck()
 
@@ -329,12 +381,7 @@ class Agent:
         s.every("dns_cache", 60.0, self.job_router_cache, phase_s=17)
         s.every("stun", iv["stun"], self.job_stun, phase_s=3.3)
         s.every("tcp_connect", iv["tcp_connect"], self.job_tcp, phase_s=1.3, max_inflight=2)
-        if sys.platform == "win32" or (sys.platform.startswith("linux") and self.env.link == "wifi"):
-            self.wifi_src = wifi.WindowsWifi() if sys.platform == "win32" else wifi.LinuxWifi(self.env.iface)
-            s.every("wifi", iv["wifi_windows"] if sys.platform == "win32" else iv["wifi"], self.job_wifi)
-        elif self.env.link == "wired" and self.env.iface:
-            self.link_tracker = link.LinkTracker(self.env.iface, now_ms=self.now)
-            s.every("link", iv["link"], self.job_link)
+        s.every("link_layer", 1.0, self.job_link_layer, phase_s=0.7)
         s.every("aggregate", 1.0, self.job_aggregate, phase_s=0.9)
         s.every("store", STORE_FLUSH_S, self.job_store, phase_s=2.0)
         s.every("findings", 5.0, self.job_findings, phase_s=4.1)

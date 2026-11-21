@@ -68,7 +68,7 @@ def measure() -> dict[str, int]:
         await one("dns_tcp", dns_probe.tcp("127.0.0.1", "dns_public", "google", NOW, port=dport))
         await one("line_hb", line_hb.probe(Target("127.0.0.1", sport, "udp", "stun", "cloudflare"), NOW))
         await one("tcp_connect", tcp_connect.probe(Target("127.0.0.1", oport, "tcp", "tcp443", "google"), NOW))
-        w = StunWatcher([("127.0.0.1", sport, "cloudflare"), ("127.0.0.1", sport, "google")], NOW)
+        w = StunWatcher([("a", "127.0.0.1", sport, "cloudflare"), ("b", "127.0.0.1", sport, "google")], NOW)
         await one("stun", w.probe())
         w.close()
         for x in (dt, st):

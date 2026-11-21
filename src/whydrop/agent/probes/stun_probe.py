@@ -40,17 +40,19 @@ class _Server(asyncio.DatagramProtocol):
 class StunWatcher:
     """One connected UDP socket per server, kept open so its NAT mapping stays the same between probes."""
 
-    def __init__(self, servers: list[tuple[str, int, str]], now_ms):
-        self._servers = [(require_ipv4(ip), port, prov) for ip, port, prov in servers]  # (ip, port, provider)
+    def __init__(self, servers: list[tuple[str, str, int, str]], now_ms, *, public_ip: str | None = None):
+        """servers: (name for the pair id, resolved IPv4, port, provider). Pair ids use the name, so history
+        survives a provider rotating its addresses."""
+        self._servers = [(name, require_ipv4(ip), port, prov) for name, ip, port, prov in servers]
         self._now_ms = now_ms
         self._conns: dict[int, _Server] = {}
-        self.public_ip: str | None = None
+        self.public_ip: str | None = public_ip
         self._ports: dict[int, int] = {}
         self._candidate: tuple[str | None, int] = (None, 0)
         self._disagree = 0
 
     async def _ask(self, i: int) -> tuple[tuple[str, int] | None, float | None, dict]:
-        ip, port, _ = self._servers[i]
+        _, ip, port, _ = self._servers[i]
         loop = asyncio.get_running_loop()
         conn = self._conns.get(i)
         if conn is None or conn.transport is None or conn.transport.is_closing():
@@ -80,8 +82,8 @@ class StunWatcher:
         answers = await asyncio.gather(*(self._ask(i) for i in range(len(self._servers))))
         out: list = []
         for i, (mapped, rtt, detail) in enumerate(answers):
-            ip, port, provider = self._servers[i]
-            out.append(Result("stun", pair_id("stun", ip, port, "udp"), provider, t_send, mapped is not None,
+            name, _, port, provider = self._servers[i]
+            out.append(Result("stun", pair_id("stun", name, port, "udp"), provider, t_send, mapped is not None,
                               rtt, local_fail=bool(detail.get("local_fail")), detail=detail))
         mapped = [a[0] for a in answers]
         out.extend(self._judge(mapped, t_send))
@@ -117,7 +119,7 @@ class StunWatcher:
                     continue
                 old = self._ports.get(i)
                 if old is not None and old != m[1]:
-                    events.append(Event("mapping_reset", t_ms, pair_id("stun", *self._servers[i][:2], "udp"),
+                    events.append(Event("mapping_reset", t_ms, pair_id("stun", self._servers[i][0], self._servers[i][2], "udp"),
                                         {"old_port": old, "new_port": m[1]}))
                 self._ports[i] = m[1]
         return events

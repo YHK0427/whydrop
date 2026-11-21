@@ -105,7 +105,7 @@ async def fake_stun():
 def test_stun_ip_change_needs_two_rounds_both_servers():
     async def main():
         (t1, a, p1), (t2, b, p2) = await fake_stun(), await fake_stun()
-        w = StunWatcher([("127.0.0.1", p1, "cloudflare"), ("127.0.0.1", p2, "google")], NOW)
+        w = StunWatcher([("a", "127.0.0.1", p1, "cloudflare"), ("b", "127.0.0.1", p2, "google")], NOW)
         first = await w.probe()
         a.mapped = ("203.0.113.9", 40000)  # only one server sees a new IP: not a change
         one = await w.probe()
@@ -125,7 +125,7 @@ def test_stun_ip_change_needs_two_rounds_both_servers():
 def test_stun_port_only_change_is_mapping_reset():
     async def main():
         (t1, a, p1), (t2, b, p2) = await fake_stun(), await fake_stun()
-        w = StunWatcher([("127.0.0.1", p1, "cloudflare"), ("127.0.0.1", p2, "google")], NOW)
+        w = StunWatcher([("a", "127.0.0.1", p1, "cloudflare"), ("b", "127.0.0.1", p2, "google")], NOW)
         await w.probe()
         a.mapped = ("203.0.113.5", 40001)
         out = await w.probe()
@@ -187,7 +187,7 @@ def test_probes_refuse_hostnames():
     with pytest.raises(ValueError):
         asyncio.run(line_hb.probe(Target("stun.cloudflare.com", 3478, "udp", "stun", "cloudflare"), NOW))
     with pytest.raises(ValueError):
-        StunWatcher([("stun.l.google.com", 19302, "google")], NOW)
+        StunWatcher([("stun.l.google.com", "stun.l.google.com", 19302, "google")], NOW)
     with pytest.raises(ValueError):
         asyncio.run(line_hb.probe(Target("127.1", 53, "udp", "dns", "opendns"), NOW))
 
@@ -209,3 +209,17 @@ WIN_ONLINK = WINDOWS_ROUTE.replace("192.0.2.1    ", "On-link      ")
 def test_host_net_point_to_point_and_onlink():
     assert host_net.parse_linux_route(PTP_ROUTE) == (None, "ppp0")
     assert host_net.parse_windows_route(WIN_ONLINK) == (None, "192.0.2.50")
+
+
+def test_stun_pair_ids_use_the_name_and_public_ip_carries_over():
+    async def main():
+        (t1, a, p1), (t2, b, p2) = await fake_stun(), await fake_stun()
+        w = StunWatcher([("stun.example", "127.0.0.1", p1, "cloudflare"), ("stun2.example", "127.0.0.1", p2, "google")],
+                        NOW, public_ip="203.0.113.5")
+        out = await w.probe()
+        w.close(); t1.close(); t2.close()
+        return out
+    out = asyncio.run(main())
+    pairs = sorted(r.pair.split(":")[1] for r in out if hasattr(r, "probe"))
+    assert pairs == ["stun.example", "stun2.example"]
+    assert not [x for x in out if getattr(x, "kind", None)]  # same public IP as before: no ip_change

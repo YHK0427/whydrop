@@ -125,3 +125,14 @@ def test_rebase_hides_startup_gap_on_windows():
     t.rebase()
     f.advance(1)
     assert t.check() == []
+
+
+def test_boot_step_before_rebase_is_followed():
+    f = Fake()
+    t = tb(f)
+    f.advance(20)
+    f.wall += 3600  # NTP fixes a clock without RTC while the agent waits for time sync and the route
+    t.rebase()
+    assert abs(t.now_ms() - f.wall * 1000) < 1
+    f.advance(1)
+    assert t.check() == [] and abs(t.now_ms() - f.wall * 1000) < 1

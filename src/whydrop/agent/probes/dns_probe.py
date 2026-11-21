@@ -60,6 +60,8 @@ async def tcp(addr: str, cls: str, provider: str | None, now_ms, *, port: int = 
         detail: dict = {}
     except asyncio.TimeoutError:
         data, detail = None, {"timeout": True}
+    except ConnectionRefusedError as e:
+        data, detail = None, classify_oserror(e)
     except (asyncio.IncompleteReadError, ConnectionError) as e:
         data, detail = None, {"error": type(e).__name__}
     except OSError as e:

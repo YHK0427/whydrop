@@ -5,6 +5,7 @@ import socket
 import struct
 import sys
 
+from whydrop.agent.proc import run_cmd
 from whydrop.agent.results import Result
 
 _WIN_DEFAULT = re.compile(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)", re.M)
@@ -38,10 +39,7 @@ async def default_route() -> tuple[str | None, str | None]:
             return None, None
     if sys.platform == "win32":
         try:
-            proc = await asyncio.create_subprocess_exec("route", "print", "-4", "0.0.0.0",
-                                                        stdout=asyncio.subprocess.PIPE,
-                                                        stderr=asyncio.subprocess.DEVNULL)
-            out, _ = await asyncio.wait_for(proc.communicate(), 5)
+            out = await run_cmd("route", "print", "-4", "0.0.0.0", timeout_s=5)
             return parse_windows_route(out.decode("utf-8", "replace"))
         except (OSError, asyncio.TimeoutError):
             return None, None

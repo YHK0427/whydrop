@@ -177,3 +177,49 @@ def test_vpn_egress_is_a_standing_finding(fakes):
     envs[0] = EnvInfo("eth0", "192.0.2.1", "wired", (), True, False, "tailscale0")
     run_for(cfg, 1.0)
     assert db(cfg, "select kind from findings") == [("vpn_egress",)]
+
+
+def test_route_appears_later_then_link_is_recorded(fakes, monkeypatch):
+    cfg, calls, envs = fakes
+    envs[0] = EnvInfo(None, None, "unknown", (), False, False, None)
+    envs.append(EnvInfo("eth0", "192.0.2.1", "wired", (), False, False, "eth0"))
+    monkeypatch.setattr(runmod, "NETWATCH_EVERY_S", 0.3)
+    monkeypatch.setattr(runmod.sys, "platform", "linux")
+    run_for(cfg, 2.0)
+    assert ("link",) in db(cfg, "select distinct probe from samples_1s")
+
+
+def test_recheck_failures_open_no_findings(fakes, monkeypatch):
+    cfg, _, _ = fakes
+
+    async def fail(*a, **k):
+        return Result("dns", "dns_public:9.9.9.9:53/udp", "quad9", 0, False, None)
+
+    async def main():
+        agent = runmod.Agent(cfg, asyncio.Event())
+        agent.findings = runmod.FindingsTracker(agent.targets, agent.now)
+        agent.targets.exclude("dns_public:9.9.9.9:53/udp", "no answer on this network")
+        agent._sc_excluded = {"dns_public:9.9.9.9:53/udp"}
+        monkeypatch.setattr(agent, "check_pairs",
+                            lambda: [runmod.CheckPair("dns_public:9.9.9.9:53/udp", "quad9", "dns_public", "9.9.9.9", "udp", fail)])
+        base = [0]
+        monkeypatch.setattr(agent, "now", lambda: base[0])
+        agent.findings._now_ms = lambda: base[0]
+        for _ in range(4):
+            base[0] += 600_000
+            await agent.job_recheck()
+        return agent.findings.check(), agent.targets.excluded
+    events, excluded = asyncio.run(main())
+    assert events == [] and excluded["dns_public:9.9.9.9:53/udp"] == "no answer on this network"
+
+
+def test_selfcheck_keeps_retrying_past_the_backoff_list(fakes, monkeypatch):
+    cfg, calls, _ = fakes
+
+    async def inconclusive(*a, **k):
+        calls["selfcheck"] += 1
+        return SelfCheck("inconclusive")
+    monkeypatch.setattr(runmod, "run_selfcheck", inconclusive)
+    monkeypatch.setattr(runmod, "BACKOFF_S", (0.05, 0.05))
+    run_for(cfg, 1.5)
+    assert calls["selfcheck"] >= 6  # inline pass + background loop that does not give up
