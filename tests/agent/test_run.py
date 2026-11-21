@@ -239,3 +239,17 @@ def test_boot_clock_step_during_startup_does_not_skew_run_start(fakes, monkeypat
     run_for(cfg, 1.0)
     [(start,)] = db(cfg, "select start_ms from agent_runs")
     assert abs(start / 1000 - (_time.time() + 3600)) < 30
+
+
+def test_selfcheck_covers_tcp_for_every_tcp_probed_class(fakes):
+    cfg, _, _ = fakes
+
+    async def main():
+        a = runmod.Agent(cfg, asyncio.Event())
+        a.targets.router_dns, a.targets.isp_dns = "192.0.2.1", ("198.51.100.53",)
+        names = {cp.pair for cp in a.check_pairs()}
+        tcp_probed = {(c, addr) for c in ("dns_public", "dns_isp") for addr, _ in a.targets.dns_pairs(c)}
+        return names, tcp_probed
+    names, tcp_probed = asyncio.run(main())
+    assert all(f"{c}:{addr}:53/tcp" in names for c, addr in tcp_probed)
+    assert "dns_isp:198.51.100.53:53/tcp" in names  # found on the real home network: one ISP resolver refuses TCP

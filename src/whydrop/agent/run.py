@@ -117,7 +117,7 @@ class Agent:
             for addr, prov in t.dns_pairs(cls, include_excluded=True):
                 pairs.append(CheckPair(pair_id(cls, addr, 53, "udp"), prov, cls, addr, "udp",
                                        lambda a=addr, c=cls, p=prov: dns_probe.udp(a, c, p, now)))
-                if cls == "dns_public":
+                if cls in ("dns_public", "dns_isp"):  # every class job_dns_tcp probes is checked over TCP too
                     pairs.append(CheckPair(pair_id(cls, addr, 53, "tcp"), prov, cls, addr, "tcp",
                                            lambda a=addr, c=cls, p=prov: dns_probe.tcp(a, c, p, now)))
         for s in t.by_kind("stun"):
