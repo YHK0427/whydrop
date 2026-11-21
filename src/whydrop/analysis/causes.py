@@ -173,13 +173,17 @@ class Settler:
             if c.op == "close" and c.incident.end_ms is not None:  # (None: reopened by a merge in this same step)
                 prov = classify(c.incident, frames, cond, self.ctx)
                 c.incident.evidence["provisional"] = prov.rule
-                self._due[c.incident.key] = (c.incident.end_ms + K.SETTLE_S * 1000, c.incident, prov)
+                wait = K.SETTLE_S
+                if c.incident.segments & {"lan", "wifi", "link", "host_net"}:
+                    wait = max(wait, K.MERGE_AFTER_LOCAL_S)   # a line drop may still join it (router restart)
+                self._due[c.incident.key] = (c.incident.end_ms + wait * 1000, c.incident, prov)
             elif c.op != "close":
                 self._due.pop(c.incident.key, None)   # reopened by a merge: settle again after the new end
         out = []
         for key, (due, inc, prov) in list(self._due.items()):
             if due <= frame.t_ms:
                 del self._due[key]
+                inc.final = True
                 final = classify(inc, frames, cond, self.ctx)
                 out.append(Final(inc, final, prov, (final.rule, final.label) != (prov.rule, prov.label)))
         return out
