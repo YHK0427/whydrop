@@ -25,7 +25,7 @@ EVENT_DETAIL = {   # kind → detail keys that are safe to show
 }
 INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "events", "provisional",
                      "cause_direction", "cause_lost_up", "cause_lost_down", "cause_classes", "interval_s"}
-STATUS = {"version", "mode", "baseline"}
+STATUS = {"version", "mode", "baseline", "segments", "signal_dbm", "link", "vpn", "analysis_lag_s"}
 
 
 def _ip(m: re.Match) -> str:
@@ -106,7 +106,10 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
                 "rtt_min", "rtt_avg", "rtt_max", "rtt_p95")
         return {"t_s": _rel(r.get("ts_ms"), now_ms), "pair": mask_pair(r.get("pair")), **{k: r[k] for k in keep if k in r}}
     if kind == "status":
-        return {k: r[k] for k in STATUS if k in r}
+        out = {k: r[k] for k in STATUS if k in r}
+        if r.get("since_ms"):
+            out["since_s"] = _rel(r["since_ms"], now_ms)
+        return out
     if kind == "selfcheck":
         res = _j(r.get("result_json"))
         return {"t_s": _rel(r.get("ts_ms"), now_ms), "excluded": len(res.get("excluded", {})),

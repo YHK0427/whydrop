@@ -91,7 +91,9 @@ def availability(db, from_ms: int, to_ms: int) -> dict:
         drops += 1
     recorded = max(1, to_ms - from_ms - sum(min(g["end_ms"], to_ms) - max(g["start_ms"], from_ms)
                                            for g in gaps(db, from_ms, to_ms)))
-    return {"availability": round(100 * (1 - down_ms / recorded), 2), "drops": drops, "down_s": round(down_ms / 1000)}
+    pct = 100 * (1 - down_ms / recorded)
+    shown = min(round(pct, 3), 99.999) if down_ms else 100.0   # a drop never rounds up to a perfect month
+    return {"availability": shown, "drops": drops, "down_s": round(down_ms / 1000)}
 
 
 def add_annotation(db, start_ms: int, end_ms: int | None, label: str, note: str | None) -> int:

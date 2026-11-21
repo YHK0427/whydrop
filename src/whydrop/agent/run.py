@@ -93,6 +93,8 @@ class Agent:
         self._canaries: list[asyncio.Task] = []
         self._providers: dict[str, str] = {}
         self._nat_tcp_lower: int | None = None
+        self._signal_dbm = None
+        self._run_started_ms = None
         self._web = None
         self._web_task = None
         self._nat_task: asyncio.Task | None = None
@@ -137,6 +139,8 @@ class Agent:
                     self._providers[x.pair] = x.provider
                 if x.probe == "gateway" and x.ok:
                     self._gw_seen = True
+                if x.probe == "wifi":
+                    self._signal_dbm = x.detail.get("signal_dbm")
                 if x.ok and x.probe in ("line_hb", "tcp_connect", "stun"):  # basic external probes
                     self._line_ok_ms = self.now()
             else:
@@ -550,7 +554,19 @@ class Agent:
                 "reflector": None if not self.precision else {"hot": self.hot.state if self.hot else None,
                                                               "stream_ok": bool(self.stream and self.stream.last_echo_ms)},
                 "bytes": dict(traffic.BYTES), "baseline": self.engine.cond.baseline_state(self.now()) if self.engine else "none",
-                "now_ms": self.now()}
+                "now_ms": self.now(), "segments": self._segment_states(), "signal_dbm": self._signal_dbm,
+                "link": self.env.link if self.env else "unknown", "vpn": bool(self.env and self.env.egress_vpn),
+                "since_ms": self._run_started_ms, "analysis_lag_s": 14}
+
+    def _segment_states(self) -> dict:
+        """What the path diagram shows: ok / down / unknown / unobservable / checking per hop."""
+        if self.engine is None:
+            return {s: "checking" for s in ("host_net", "wifi", "link", "lan", "line", "dns")}
+        seg = self.engine.seg
+        out = {s: seg.state(s) for s in ("host_net", "wifi", "link", "lan", "line")}
+        dns = [seg.state(c) for c in ("dns_router", "dns_isp", "dns_public")]
+        out["dns"] = "down" if "down" in dns else "up" if "up" in dns else "unknown"
+        return out
 
     def web_nat_run(self) -> bool:
         """POST /api/nat/run: False while one is already running (→ 409)."""
@@ -599,7 +615,8 @@ class Agent:
             return
         app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
                          public_default=self.cfg.web.public_view_default, status=self.status,
-                         nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress)
+                         nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress,
+                         packets=lambda: list(self.stream.packets) if self.stream else [])
         import socket as _socket
         try:  # bind ourselves: uvicorn's own bind failure calls sys.exit, which would take the agent down
             fam = _socket.AF_INET6 if ":" in host else _socket.AF_INET
@@ -699,6 +716,7 @@ class Agent:
         self.tags["mode"] = "precision" if self.precision else "basic"
         if why_not and self.cfg.reflector:
             log.warning("precision mode off: %s", why_not)
+        self._run_started_ms = self.now()
         self.run_id = await self.store.run_start(self.now(), __version__, self.tags)
         await self.vpn_finding()
         # one bounded pass inline; if it can't decide (e.g. started mid-outage), keep retrying in the background

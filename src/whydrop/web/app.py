@@ -107,6 +107,16 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             raise HTTPException(404, "no such drop")
         return PlainTextResponse(mask_text(text) if is_public(request) else text)
 
+    @app.get("/api/incidents/{iid}/strip")
+    async def get_strip(iid: int):
+        """Per-packet record kept ±60 s around the drop (precision mode only)."""
+        inc = await run(Q.incident, db_path, iid)
+        if inc is None:
+            raise HTTPException(404, "no such drop")
+        a, b = inc["start_ms"] - 60_000, (inc["end_ms"] or _now()) + 60_000
+        return await run(Q.rows, db_path, "SELECT ts_ms, seq, echoed, dir FROM udp_seq_ring WHERE ts_ms >= ? AND ts_ms <= ? "
+                                         "ORDER BY seq LIMIT 3000", (a, b))
+
     @app.get("/api/conditions")
     async def get_conditions(request: Request):
         frm, to = span(request, 7 * DAY_MS)

@@ -163,6 +163,7 @@ class UdpStream:
         self._last_epoch: int | None = None
         self._reconnect: asyncio.Task | None = None
         self.last_echo_ms: int | None = None
+        self.packets: deque = deque(maxlen=200)   # recent raw WD packets for the Protocol tab
         self._opened_at = 0.0
         self._last_echo_mono = 0.0
         self._unsent = 0            # slots that never went out get keys < 0: they must not use up seqs
@@ -237,8 +238,10 @@ class UdpStream:
                 continue
             self._seq = (self._seq + 1) & 0xFFFFFFFF
             self.book.sent(self._seq, now)
-            self._transport.sendto(wd.encode(WdPacket(WdType.PROBE, self.session_id, self._seq, time.perf_counter_ns()),
-                                             self.secret))
+            raw = wd.encode(WdPacket(WdType.PROBE, self.session_id, self._seq, time.perf_counter_ns()), self.secret)
+            self._transport.sendto(raw)
+            self.packets.append({"ts_ms": now, "dir": "out", "type": "PROBE", "seq": self._seq, "size": len(raw),
+                                 "hex": raw.hex()})
             traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
 
     def _on_datagram(self, data: bytes, addr) -> None:
@@ -252,6 +255,8 @@ class UdpStream:
             return
         traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
         self.last_echo_ms = self.tb.now_ms()
+        self.packets.append({"ts_ms": self.last_echo_ms, "dir": "in", "type": "ECHO", "seq": p.seq, "size": len(data),
+                             "hex": data.hex()})
         self._last_echo_mono = time.monotonic()
         self._win_backoff = 1.0
         if self._last_epoch is not None and p.epoch != self._last_epoch:
