@@ -64,6 +64,8 @@ class Segments:
         self._first_ok: int | None = None
         self._stream_bad_prev = False
         self.last_recovery_ms = -1                # last lan/line recovery: DNS attempts before it don't count
+        self._local_up_ms = -1                    # last wifi/link/lan recovery: a line down never starts before it
+        self._line_down_spans: deque = deque(maxlen=16)
         self._dns = {c: "unknown" for c in DNS_CLASSES}
         self._dns_hist = {c: deque() for c in DNS_CLASSES}
 
@@ -94,10 +96,13 @@ class Segments:
             if change:
                 t = frame.t_ms if forced else held._run[1]
                 out.append(SegmentChange(t, seg, change))
+                if change == "up" and seg != "host_net":
+                    self._local_up_ms = max(self._local_up_ms, t)
         lan_before = self._lan
         out += self._step_lan(frame)
         if lan_before == "down" and self._lan == "up":
             self.last_recovery_ms = frame.t_ms
+            self._local_up_ms = max(self._local_up_ms, frame.t_ms)
         if not (frame.lag or frame.suspended):
             out += self._step_line(frame)
             out += self._step_dns(frame)
@@ -177,9 +182,12 @@ class Segments:
             return []
         oks = [x[0] for x in self._q if not x[4] and x[0] < win[0][0]]
         start = min(x[0] for x in self._q if x[4] and x[0] > (max(oks) if oks else -1))
+        start = max(start, self._local_up_ms)
         span = [x[5] for x in self._q if x[0] >= start]
         lost, late = sum(r.lost for r in span), sum(r.late for r in span)
-        hb = [x[5] for x in self._q if x[1] == "line_hb" and start - K.GATE_WINDOW_S * 1000 <= x[0] < start]
+        in_outage = lambda u: any(a <= u < b for a, b in self._line_down_spans)  # noqa: E731
+        hb = [x[5] for x in self._q if x[1] == "line_hb" and start - K.GATE_WINDOW_S * 1000 <= x[0] < start
+              and not in_outage(x[0])]                 # a previous outage is not "a lossy period"
         sent_hb = sum(r.sent - r.local_fail for r in hb)
         hb_loss = sum(r.lost + r.late for r in hb) / sent_hb if sent_hb else 0.0
         self._line, self._line_start, self._first_ok = "down", start, None
@@ -213,6 +221,7 @@ class Segments:
             out.append(SegmentChange(self._first_ok, "line", "up"))
             self._line = "up"
             self.last_recovery_ms = self._first_ok
+            self._line_down_spans.append((self._line_start, self._first_ok))
         return out
 
     # ---------- DNS ----------
