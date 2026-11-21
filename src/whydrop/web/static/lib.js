@@ -10,6 +10,7 @@ export function setPublic(v) { isPublic = isPublic || !!v; }   // web.public_vie
 export let STATIC = null;
 export async function detectStatic() {
   try { const r = await fetch("static.json", { cache: "no-store" }); if (r.ok) STATIC = await r.json(); } catch { STATIC = null; }
+  if (!STATIC?.static) STATIC = null;
   if (STATIC) setPublic(true);
   return STATIC;
 }

@@ -49,6 +49,10 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.db_path, app.state.bus, app.state.public_default = db_path, bus, public_default
 
+    @app.get("/static.json")
+    async def not_static():
+        return {"static": False}   # the live dashboard; export-static writes a real static.json
+
     @app.get("/api/health")
     async def health():
         return {"ok": True}
