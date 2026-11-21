@@ -16,10 +16,11 @@ services:
     cpu_shares: 256              # lower priority only; a hard CPU quota would distort the measurements
     environment:
       WHYDROP_DB_PATH: /data/whydrop.db
+      WHYDROP_REFLECTOR: ${WHYDROP_REFLECTOR:-}            # host[:port] of your reflector → precision mode
+      WHYDROP_SECRET: ${WHYDROP_SECRET:-}                  # from .env only; never written here
       WHYDROP_WEB_BIND: ${WHYDROP_WEB_BIND:-0.0.0.0:8790}   # LAN-reachable; a token is generated and logged once
       WHYDROP_UI_TOKEN: ${WHYDROP_UI_TOKEN:-}
       WHYDROP_WEB_ALLOWED_HOSTS: ${WHYDROP_WEB_ALLOWED_HOSTS:-}   # extra host names, comma-separated
-      TZ: ${TZ:-}                                               # times in summaries; /etc/localtime below
     volumes:
       - whydrop-data:/data
       - /run/systemd/resolve:/run/systemd/resolve:ro

@@ -64,7 +64,10 @@ def mask_pair(pair: str | None) -> str | None:
         if not addr:
             addr, tail = rest, ""
         return f"{cls}:{mask_text(addr)}:{tail}" if tail else f"{cls}:{mask_text(addr)}"
-    return cls
+    return pair if pair in PLAIN_PAIRS else "hidden"   # anything unforeseen (an interface name, a host) stays hidden
+
+
+PLAIN_PAIRS = {"gateway", "reflector", "wifi", "link", "host_net", "loop"}
 
 
 def _rel(ms, now_ms):
@@ -127,5 +130,5 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
     if kind == "gap":
         return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms)}
     if kind == "annotation":
-        return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms), "label": r.get("label")}
+        return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms), "label": mask_text(r.get("label") or "")}
     return {}

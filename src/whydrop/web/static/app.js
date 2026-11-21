@@ -1,5 +1,5 @@
 // Shell: top bar, hash router, theme/language, the live connection (spec §8, UI design doc §3).
-import { api, dur, h, isPublic, lang, loadLang, prefsGet, prefsSet, setPublic, t, token } from "./lib.js";
+import { api, detectStatic, dur, h, isPublic, lang, loadLang, prefsGet, prefsSet, setPublic, STATIC, t, token } from "./lib.js";
 
 const routes = [
   { re: /^#?\/?$/, page: () => import("./pages/now.js"), nav: "now" },
@@ -24,7 +24,7 @@ function topBar(active) {
   const theme = prefsGet("whydrop.theme") || "system";
   const next = { system: "light", light: "dark", dark: "system" };
   const st = live.status;
-  const rec = st && st.since_ms ? t("top.recording", { dur: dur((Date.now() - st.since_ms) / 1000) })
+  const rec = STATIC ? t("static.rec") : st && st.since_ms ? t("top.recording", { dur: dur((Date.now() - st.since_ms) / 1000) })
     : st && st.since_s != null ? t("top.recording", { dur: dur(-st.since_s) }) : t("top.not_recording");
   return h("header", {},
     h("div", { class: "top" },
@@ -82,6 +82,7 @@ async function render() {
   if (mine !== generation) return;          // the user navigated again while the page loaded: leave theirs alone
   const main = h("main", { id: "main", tabindex: "-1" });
   app.replaceChildren(main);
+  if (STATIC) main.before(h("p", { class: "banner static" }, t("static.banner", { from: STATIC.recorded?.[0] || "", to: STATIC.recorded?.[1] || "" })));
   if (isPublic) app.append(h("div", { class: "publicbadge" }, t("badge.public")));
   const undo = await mod.mount(main, { id: m?.[1] && Number(m[1]), refresh: render });
   if (mine !== generation) undo?.();        // finished after a newer render began: undo only this mount
@@ -91,11 +92,11 @@ async function render() {
 
 (async () => {
   applyTheme(prefsGet("whydrop.theme") || "system");
-  await loadLang(lang);
+  await Promise.all([loadLang(lang), detectStatic()]);
   await refreshStatus();
   window.addEventListener("hashchange", render);
   await render();
-  connect();
+  if (!STATIC) connect();   // the static demo has no live feed
   setInterval(async () => {   // only the recording text changes: focus and the header stay put
     await refreshStatus();
     const fresh = topBar((routes.find(r => r.re.test(location.hash || "#/")) || routes[0]).nav).querySelector(".rec");

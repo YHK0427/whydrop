@@ -77,6 +77,8 @@ h3 { font-size: 15px; font-weight: 600; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s6); }
 .banner { padding: var(--s3) var(--s4); border-left: 3px solid var(--warn); background: var(--surface); margin: var(--s3) 0; }
 .banner.bad { border-left-color: var(--critical); }
+.banner.static { max-width: 1168px; margin: var(--s3) auto; }
+@media (max-width: 1200px) { .banner.static { margin: var(--s3) var(--s4); } }
 .labelbanner { padding: var(--s2) var(--s4); background: var(--surface); border: 1px dashed var(--ink-3); margin-bottom: var(--s3);
   font-weight: 600; }
 .copybox { width: 100%; font: 13px/1.5 var(--mono); margin: var(--s3) 0; background: var(--surface); color: var(--ink);

@@ -2,7 +2,7 @@
 import { lanes, series } from "../components/lanes.js";
 import { pathDiagram } from "../components/path.js";
 import { strip } from "../components/strip.js";
-import { api, dur, errorPanel, h, parseIncident, startMs, t, toast, token, when } from "../lib.js";
+import { api, dur, errorPanel, h, parseIncident, startMs, STATIC, t, toast, token, when } from "../lib.js";
 
 const ORDER = ["host_net", "wifi", "lan", "line", "dns"];
 const REPO_ISSUES = "https://github.com/YHK0427/whydrop/issues/new";
@@ -69,8 +69,8 @@ export async function mount(main, { id, refresh }) {
   let samples, events, ringRows;
   try {
     [samples, events, ringRows, ann] = await Promise.all([
-      api(`/api/chart?from=${from}&to=${to}&step=1`), api(`/api/events?from=${from}&to=${to}`),
-      api(`/api/incidents/${id}/strip`).catch(() => []), api(`/api/annotations?from=${from}&to=${to}`).catch(() => [])]);
+      api(`/api/chart?from=${from}&to=${to}&step=1&incident=${id}`), api(`/api/events?from=${from}&to=${to}&incident=${id}`),
+      api(`/api/incidents/${id}/strip`).catch(() => []), api(`/api/annotations?from=${from}&to=${to}&incident=${id}`).catch(() => [])]);
   } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
 
   const durS = d.end ? (d.end - d.start) / 1000 : (Date.now() - d.start) / 1000;
@@ -86,7 +86,7 @@ export async function mount(main, { id, refresh }) {
       if (await copyText(text)) toast(t("drop.copied"));
       else showText(main, text);   // http://<LAN IP> is not a secure context: no clipboard API there
     } }, t("drop.copy")),
-    h("button", { class: "btn", type: "button", onclick: () => download(`/api/export/bugreport/${id}`, `whydrop-bugreport-${id}.json`) },
+    STATIC ? null : h("button", { class: "btn", type: "button", onclick: () => download(`/api/export/bugreport/${id}`, `whydrop-bugreport-${id}.json`) },
       t("drop.export_json")),
     h("button", { class: "btn", type: "button", onclick: () => card(d, headline) }, t("drop.card")),
     h("a", { class: "btn", target: "_blank", rel: "noopener noreferrer",

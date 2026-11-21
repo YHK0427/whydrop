@@ -1,0 +1,19 @@
+name: Bug / 버그
+description: Something doesn't work / 뭔가 동작하지 않아요
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected / 일어난 일과 기대한 것
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (remove addresses first) / 로그 (주소는 지우고)
+      render: text
+  - type: input
+    id: setup
+    attributes:
+      label: Setup / 환경
+      placeholder: "OS, Docker or native, basic or precision, version"

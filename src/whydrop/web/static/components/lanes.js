@@ -10,7 +10,7 @@ export function series(c, mode) {
   // /api/chart is already bucketed and columnar; the lanes only pick the loss source and smooth the latency
   const stepS = c.step_s;
   return {
-    x: c.x, up: c.up, down: c.down,
+    x: c.x_rel ? c.x_rel.map(v => Date.now() / 1000 + v) : c.x, up: c.up, down: c.down,   // public view: relative s
     unknown: mode === "basic" ? c.basic_lost : c.stream_unknown,
     rtt: smooth(c.rtt, stepS < 10 ? Math.round(10 / stepS) : 1),
     tcp: c.tcp,

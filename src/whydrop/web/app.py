@@ -36,7 +36,7 @@ def public_message(msg: dict, now_ms: int) -> dict:
     return {"type": msg["type"], "ts": 0, "data": {"op": data.get("op"), "row": row}}
 
 
-def _now() -> int:
+def _wall_now() -> int:
     return int(time.time() * 1000)
 
 
@@ -45,9 +45,15 @@ def _dumps(obj) -> bytes:
 
 
 def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str], public_default: bool,
-               status=None, nat_run=None, nat_state=None, packets=None) -> FastAPI:
+               status=None, nat_run=None, nat_state=None, packets=None, clock=None) -> FastAPI:
+    """clock: epoch-ms source; export-static pins it to the end of the exported range."""
+    _now = clock or _wall_now
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.db_path, app.state.bus, app.state.public_default = db_path, bus, public_default
+
+    @app.get("/static.json")
+    async def not_static():
+        return {"static": False}   # the live dashboard; export-static writes a real static.json
 
     @app.get("/api/health")
     async def health():
@@ -88,7 +94,7 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     @app.get("/api/status")
     async def get_status(request: Request):
         st = {**(status() if status else {}), "public": is_public(request)}
-        frm = int(time.mktime(time.localtime()[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)  # start of this month (local)
+        frm = int(time.mktime(time.localtime(_now() / 1000)[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)  # month start (local)
         st["month"] = await asyncio.to_thread(Q.availability, db_path, frm, _now())
         if is_public(request):
             st = to_public(st, "status", _now()) | {"month": st["month"], "public": True}
@@ -99,7 +105,14 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         """What the lanes draw, already bucketed and columnar: a few kB instead of every per-pair row."""
         frm, to = span(request, 3_600_000)
         step = request.query_params.get("step")
-        return await reply(request, lambda: Q.chart(db_path, frm, to, int(step) if step and step.isdigit() else None))
+        pub, now = is_public(request), _now()
+
+        def work():
+            res = Q.chart(db_path, frm, to, int(step) if step and step.isdigit() else None, now_ms=now)
+            if pub:   # no absolute times in the public view: seconds relative to now, like every other public row
+                res["x_rel"] = [x - now // 1000 for x in res.pop("x")]
+            return _dumps(res)
+        return Response(await asyncio.to_thread(work), media_type="application/json")
 
     @app.get("/api/samples")
     async def get_samples(request: Request):
@@ -108,7 +121,8 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         pub, now = is_public(request), _now()
 
         def work():
-            res = Q.samples(db_path, frm, to, int(step) if step and step.isdigit() else None, request.query_params.get("probe"))
+            res = Q.samples(db_path, frm, to, int(step) if step and step.isdigit() else None, request.query_params.get("probe"),
+                            now_ms=now)
             if pub:
                 res["rows"] = [to_public(r, "sample", now) for r in res["rows"]]
             return _dumps(res)
@@ -130,7 +144,7 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
 
     @app.get("/api/incidents/{iid}/summary")
     async def get_summary(iid: int, request: Request):
-        text = await asyncio.to_thread(X.summary, db_path, iid, request.query_params.get("lang", "en"), is_public(request))
+        text = await asyncio.to_thread(X.summary, db_path, iid, request.query_params.get("lang", "en"), is_public(request), _now())
         if text is None:
             raise HTTPException(404, "no such drop")
         return PlainTextResponse(text)

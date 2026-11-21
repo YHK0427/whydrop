@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security issue / 보안 문제
+    url: https://github.com/YHK0427/whydrop/security/advisories/new
+    about: Report privately, not as an issue / 이슈 말고 비공개로 제보해 주세요
