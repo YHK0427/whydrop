@@ -96,6 +96,8 @@ class Agent:
         self.bus = None
         self._web = None
         self._web_task = None
+        self._nat_task: asyncio.Task | None = None
+        self._nat_progress: dict | None = None
         self._gw_seen = False
         self.fb = FrameBuilder()
         self.engine: Engine | None = None
@@ -524,6 +526,30 @@ class Agent:
                 "bytes": dict(traffic.BYTES), "baseline": self.engine.cond.baseline_state(self.now()) if self.engine else "none",
                 "now_ms": self.now()}
 
+    def web_nat_run(self) -> bool:
+        """POST /api/nat/run: False while one is already running (→ 409)."""
+        if self._nat_task is not None and not self._nat_task.done():
+            return False
+        self._nat_task = self.spawn(self._run_nat(), "nat-test")
+        return True
+
+    async def _run_nat(self) -> None:
+        from whydrop.agent.precision import natprobe
+        secret, start = load_secret(os.environ, required=True), self.now()
+        self._nat_progress = {"done": 0, "total": len(natprobe.UDP_DELAYS) + len(natprobe.TCP_DELAYS), "last": None}
+
+        def progress(r):
+            self._nat_progress["done"] += 1
+            self._nat_progress["last"] = {"proto": r.proto, "delay_s": r.delay_s, "alive": r.alive}
+        try:
+            rep = await natprobe.nat_test(reflector_addr(self.cfg), secret, on_progress=progress)
+            await natprobe.store_report(self.store, rep, start_ms=start, end_ms=self.now())
+            self._nat_tcp_lower = rep.tcp_range[0]
+            if self.engine is not None:
+                self.engine.ctx.nat_tcp_timeout_s = rep.tcp_range[0]
+        finally:
+            self._nat_progress = None
+
     async def start_web(self) -> None:
         try:
             import contextlib
@@ -541,7 +567,8 @@ class Agent:
         token = resolve_token(host, os.environ, self.cfg.db_path.parent)
         self.bus = Bus()
         app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
-                         public_default=self.cfg.web.public_view_default, status=self.status)
+                         public_default=self.cfg.web.public_view_default, status=self.status,
+                         nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress)
         server = uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning", access_log=False,
                                                lifespan="off", ws="websockets-sansio"))
         server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
