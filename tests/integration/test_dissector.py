@@ -50,7 +50,9 @@ def test_dissector_decodes_every_field(tmp_path):
     cap = tmp_path / "w.pcap"
     pcap(cap, [udp(probe), udp(echo, 48100, 40000), udp(nat, 40002, 5555), tcp(nonce, 48100, 40001),
                tcp(hello), tcp(ok, 48100, 40001, 21), tcp(hb + hb, seq=31)])
-    out = subprocess.run([TSHARK, "-X", f"lua_script:{LUA}", "-r", str(cap), "-T", "fields", "-E", "separator=|",
+    lua = tmp_path / "whydrop.lua"   # next to the pcap: distro tshark profiles may refuse paths in a checkout
+    shutil.copy(LUA, lua)
+    out = subprocess.run([TSHARK, "-X", f"lua_script:{lua}", "-r", str(cap), "-T", "fields", "-E", "separator=|",
                           "-e", "_ws.col.Info", "-e", "whydrop.wd.seq", "-e", "whydrop.wd.recv_count", "-e", "whydrop.wd.rx_bitmap",
                           "-e", "whydrop.wd.arg", "-e", "whydrop.wt.role", "-e", "whydrop.wt.param_s", "-e", "whydrop.wt.epoch",
                           "-e", "whydrop.frame.seq"], capture_output=True, text=True, timeout=60)
