@@ -553,7 +553,10 @@ class Agent:
     async def start_web(self) -> None:
         try:
             import contextlib
+            import importlib
 
+            # FastAPI takes ~1.5 s to import: do it off the event loop so probes never wait for the dashboard
+            await asyncio.to_thread(importlib.import_module, "whydrop.web.app")
             import uvicorn
 
             from whydrop.web.app import create_app
@@ -658,7 +661,7 @@ class Agent:
         elif await self.selfcheck() != "ok":
             self.start_selfcheck(after_failed=True)
         self.schedule()
-        await self.start_web()
+        self.spawn(self.start_web(), "dashboard start")
         if self.precision:
             await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now,
