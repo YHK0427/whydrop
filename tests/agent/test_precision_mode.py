@@ -50,3 +50,28 @@ def test_public_dns_interval_doubles_in_precision(monkeypatch, tmp_path):
     seen.clear()
     asyncio.run(main(False))
     assert seen[("dns_router", "192.0.2.1")] == 4 and seen[("dns_public", "8.8.8.8")] == 4
+
+
+def test_line_hb_half_rate_only_with_open_gateway_port(monkeypatch, tmp_path):
+    sent = []
+
+    async def probe(slot, now_ms, **k):
+        sent.append(slot.provider)
+        return Result("line_hb", "p", slot.provider, 0, True, 1.0)
+    monkeypatch.setattr(runmod.line_hb, "probe", probe)
+
+    async def main(open_port):
+        cfg = load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "w.db")})
+        a = runmod.Agent(cfg, asyncio.Event())
+        a.precision, a._gw_open = True, open_port
+        for s in a.targets.by_kind("stun"):
+            a.targets.resolved[s.addr] = "192.0.2.10"
+        a.agg = runmod.Aggregator(None, a.now)
+        a.findings = runmod.FindingsTracker(a.targets, a.now)
+        for _ in range(10):
+            await a.job_line_hb()
+    asyncio.run(main(True))
+    assert len(sent) == 5
+    sent.clear()
+    asyncio.run(main(False))
+    assert len(sent) == 10

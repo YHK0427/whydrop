@@ -177,8 +177,7 @@ class Agent:
     async def job_gateway(self):
         if self.env and self.env.gateway:
             r = await gateway.probe(self.env.gateway, self.cfg.gateway_port, self.now)
-            if r.ok:
-                self._gw_open = r.detail.get("method") == "tcp" and not r.detail.get("rst")
+            self._gw_open = r.ok and r.detail.get("method") == "tcp" and not r.detail.get("rst")
             await self.record(r)
 
     async def job_line_hb(self):
@@ -214,7 +213,7 @@ class Agent:
         self._rot["dns"] += 1
         mine = []
         for i, p in enumerate(self.dns_now()):
-            every = 2 * base if self.precision and p[0] == "dns_public" else base  # public DNS at 10 s in precision
+            every = max(base, 10) if self.precision and p[0] == "dns_public" else base  # public DNS ≥ 10 s in precision
             if (tick - i) % every == 0:
                 mine.append(p)
 

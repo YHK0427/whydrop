@@ -61,22 +61,29 @@ class StreamBook:
         s = self.pending.get(e.seq)
         if s is None:
             return
+        if self.epoch is not None and e.epoch != self.epoch and self.echoes and e.seq < self.echoes[-1].seq:
+            return  # a delayed ECHO from before a reflector restart: ignore it
         self.epoch = e.epoch
         self.echoes.append(e)
         if s.final:
-            if s.echo_after_ms is None and not s.late_counted and now_ms - _bucket(s.t_ms) <= LATE_MS:
+            if s.dir in ("up", "down", "unknown") and s.echo_after_ms is None and not s.late_counted \
+                    and now_ms - _bucket(s.t_ms) <= LATE_MS:
                 s.late_counted = True
                 self._late_out.append((_bucket(s.t_ms), s.dir or "unknown"))
             return
         if s.echo_after_ms is None:
-            s.echo_after_ms, s.rtt_ms = now_ms - s.t_ms, rtt_ms
+            s.echo_after_ms, s.rtt_ms = round(rtt_ms), rtt_ms  # monotonic: immune to clock steps
             if s.echo_after_ms <= RECEIVE_MS:
                 self.rtts.append(rtt_ms)
 
     def finalize(self, now_ms: int, force: bool = False) -> tuple[list[SampleRow], list[tuple[int, str]]]:
         ready: dict[int, list[tuple[int, _Send]]] = {}
         for seq, s in self.pending.items():
-            if not s.final and (force or _bucket(s.t_ms) + FINAL_MS <= now_ms):
+            if s.final:
+                continue
+            if force and s.echo_after_ms is None and not s.local_fail and now_ms - s.t_ms < RECEIVE_MS:
+                continue  # still inside its receive window at shutdown: unknown, so not counted at all
+            if force or _bucket(s.t_ms) + FINAL_MS <= now_ms:
                 ready.setdefault(_bucket(s.t_ms), []).append((seq, s))
         echoes = sorted(self.echoes, key=lambda e: e.seq)
         rows = []
@@ -144,6 +151,8 @@ class UdpStream:
         self._transport = None
         self._tasks: list[asyncio.Task] = []
         self._last_epoch: int | None = None
+        self._reconnect: asyncio.Task | None = None
+        self._warned = -1e9
 
     @property
     def ring(self):
@@ -161,7 +170,10 @@ class UdpStream:
                                                                      family=socket.AF_INET)
             return True
         except OSError as e:
-            log.warning("udp_stream: cannot reach the reflector (%s)", classify_oserror(e).get("error"))
+            if time.monotonic() - self._warned > 60:  # at most one warning a minute
+                self._warned = time.monotonic()
+                log.warning("udp_stream: cannot reach the reflector (%s)", classify_oserror(e).get("error"))
+            await asyncio.sleep(1)
             return False
 
     async def start(self) -> None:
@@ -172,13 +184,16 @@ class UdpStream:
         start, k = time.monotonic(), 0
         while True:
             k += 1
+            behind = time.monotonic() - (start + k / self.pps)
+            if behind > 1 / self.pps:  # after a stall or a wake-up: skip the missed slots, never burst
+                k = int((time.monotonic() - start) * self.pps) + 1
             await asyncio.sleep(max(0.0, start + k / self.pps - time.monotonic()))
             self._seq = (self._seq + 1) & 0xFFFFFFFF
             now = self.tb.now_ms()
             if self._transport is None or self._transport.is_closing():
                 self.book.sent(self._seq, now, local_fail=True)
-                if k % self.pps == 0:
-                    await self._connect()  # retry once a second, e.g. after the network came back
+                if self._reconnect is None or self._reconnect.done():  # resolving can block: never on the send path
+                    self._reconnect = asyncio.create_task(self._connect())
                 continue
             self.book.sent(self._seq, now)
             self._transport.sendto(wd.encode(WdPacket(WdType.PROBE, self.session_id, self._seq, time.perf_counter_ns()),
@@ -215,12 +230,16 @@ class UdpStream:
     async def _finalize_loop(self) -> None:
         while True:
             await asyncio.sleep(0.25)
-            await self._write()
+            try:
+                await self._write()
+            except Exception:
+                log.exception("udp_stream: writing samples failed")  # keep pruning and retrying
 
     async def stop(self, flush: bool = False) -> None:
-        for t in self._tasks:
+        tasks = [t for t in [*self._tasks, self._reconnect] if t]
+        for t in tasks:
             t.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
         if flush:
             await asyncio.sleep(0.3)  # let in-flight ECHOs land
             await self._write(force=True)
