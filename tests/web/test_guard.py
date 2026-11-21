@@ -115,3 +115,34 @@ def test_empty_token_file_is_replaced(tmp_path):
 def test_short_env_token_refused(tmp_path):
     with pytest.raises(ValueError):
         resolve_token("0.0.0.0", {"WHYDROP_UI_TOKEN": "short"}, tmp_path)
+
+
+def test_ip_literal_host_equal_to_arrival_address_allowed():
+    """A LAN IP that changed (DHCP) or wasn't known at startup still works; other literals and names don't."""
+    from whydrop.web.guard import HostGuard
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    def call(host, server=("192.0.2.10", 8790)):
+        import asyncio
+        out = {}
+
+        async def send(m):
+            out.setdefault("status", m.get("status"))
+
+        async def receive():
+            return {"type": "http.request"}
+        asyncio.run(HostGuard(app, ["localhost"])({"type": "http", "headers": [(b"host", host.encode())], "server": server},
+                                                   receive, send))
+        return out["status"]
+    assert call("192.0.2.10:8790") == 200 and call("localhost:8790") == 200 and call("[::1]:8790", ("::1", 8790)) == 200
+    assert call("192.0.2.99:8790") == 400 and call("evil.example") == 400
+
+
+def test_token_charset(tmp_path):
+    for bad in ("a+b/c=d+e/f=g+h/", "토큰토큰토큰토큰토큰토큰토큰토큰", "x" * 15):
+        with pytest.raises(ValueError):
+            resolve_token("0.0.0.0", {"WHYDROP_UI_TOKEN": bad}, tmp_path)
+    assert resolve_token("0.0.0.0", {"WHYDROP_UI_TOKEN": "Ab-_" * 4}, tmp_path) == "Ab-_" * 4

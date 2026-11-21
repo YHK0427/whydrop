@@ -40,7 +40,7 @@ def test_ws_public_masks():
             time.sleep(0.02)
         bus.publish("event", {"row": {"ts_ms": int(time.time() * 1000), "kind": "ip_change", "pair": None,
                                       "detail_json": json.dumps({"old": "203.0.113.7", "new": "203.0.113.9"})}})
-        bus.publish("sample", {"row": {"ts_ms": 1, "probe": "dns", "pair": "dns_isp:211.234.10.11:53/udp", "sent": 1}})
+        bus.publish("event", {"row": {"ts_ms": 1, "kind": "stall", "pair": "dns_isp:211.234.10.11:53/udp", "detail_json": "{}"}})
         a, b = s.receive_json(), s.receive_json()
         s.close()
     blob = json.dumps([a, b])

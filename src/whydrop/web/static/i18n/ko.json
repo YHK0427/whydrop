@@ -154,5 +154,6 @@
   "ev.provisional": "처음 진단",
   "ev.cause_classes": "DNS 종류",
   "ev.interval_s": "유휴 간격(초)",
-  "net.availability.sub_one": "끊김 1번, {dur}"
+  "net.availability.sub_one": "끊김 1번, {dur}",
+  "test.hint_remote": "잘 되는지 확인하고 싶다면, 이 버튼을 누른 뒤 공유기의 인터넷 선을 10초 동안 뽑아 보세요."
 }

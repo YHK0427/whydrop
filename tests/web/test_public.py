@@ -78,3 +78,7 @@ def test_line_hb_and_tcp_pairs_hide_reflector_and_unknown_hosts():
     assert mask_pair("tcp:1.1.1.1:443/tcp") == "tcp:1.1.1.1:443/tcp"
     assert mask_pair("tcp:203.0.113.50:443/tcp") == "tcp:hidden:443/tcp"
     assert mask_pair("stun:reflector.example.net:3478/udp") == "stun:hidden:3478/udp"
+
+
+def test_mask_text_leaves_clock_times_alone():
+    assert mask_text("22:07:14 and 2001:db8::1 and fe80::1:2:3") == "22:07:14 and hidden and hidden"

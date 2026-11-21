@@ -540,9 +540,7 @@ class Agent:
 
     # ---------- dashboard ----------
     def _publish_recorded(self, rows, events) -> None:
-        from dataclasses import asdict
-        for r in rows:
-            self.bus.publish("sample", {"row": asdict(r)})
+        # samples are not pushed one by one (≈ 11/s per browser for nothing): the charts re-fetch /api/chart
         for e in events:
             if e.kind != "tcp_info":
                 self.bus.publish("event", {"row": {"ts_ms": e.ts_ms, "kind": e.kind, "pair": e.pair,
@@ -608,12 +606,15 @@ class Agent:
             return
         host, _, port = self.cfg.web.bind.rpartition(":")
         host = host.strip("[]") or "127.0.0.1"
+        generated = host not in LOOPBACK and not os.environ.get("WHYDROP_UI_TOKEN") \
+            and not (self.cfg.db_path.parent / "ui-token").exists()
         try:
             token = resolve_token(host, os.environ, self.cfg.db_path.parent)
         except ValueError as e:
             log.error("dashboard off: %s", e)
             return
-        app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
+        app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts) + [
+                             h.strip() for h in os.environ.get("WHYDROP_WEB_ALLOWED_HOSTS", "").split(",") if h.strip()]),
                          public_default=self.cfg.web.public_view_default, status=self.status,
                          nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress,
                          packets=lambda: list(self.stream.packets) if self.stream else [])
@@ -628,8 +629,8 @@ class Agent:
             log.error("dashboard off: can't listen on %s:%s (%s); recording continues", host, port,
                       getattr(e, "strerror", None) or e)
             return
-        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False,
-                                               lifespan="off", ws="websockets-sansio"))
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off",
+                                               ws="websockets-sansio", timeout_graceful_shutdown=3))
         server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
         self._web = server
 
@@ -643,9 +644,14 @@ class Agent:
         self._web_task = self.spawn(serve(), "dashboard")
         if host in LOOPBACK:
             log.info("dashboard: http://%s:%s/", host, port)
-        else:  # the Jupyter way: the one place the token is shown
+        else:
             from whydrop.agent.probes import host_net
-            log.warning("dashboard: http://%s:%s/?token=%s", host_net.source_address() or host, port, token)
+            where = host_net.source_address() or ("<this machine's address>" if host in ("0.0.0.0", "::") else host)
+            if generated:  # the Jupyter way: shown once, when it is made (it is kept in the data volume)
+                log.warning("dashboard: http://%s:%s/?token=%s", where, port, token)
+            else:
+                log.info("dashboard: http://%s:%s/?token=<your token> (WHYDROP_UI_TOKEN or ui-token in the data dir)",
+                         where, port)
 
     # ---------- main ----------
     async def wait_route(self) -> bool:

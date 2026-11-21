@@ -5,8 +5,10 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-STEPS = (1, 10, 60, 600)                 # seconds
+STEPS = (1, 10, 60, 600, 3600)           # seconds
 MAX_POINTS = 5000
+CHART_POINTS = 2000
+CHART_PROBES = ("udp_stream", "line_hb", "stun", "tcp_connect", "canary")
 ONE_S_KEPT_MS = 7 * 86_400_000
 LABELS = ("reproduced", "injected", "user-test")
 LINE_SEGMENTS = ("line", "lan", "wifi", "link", "host_net")
@@ -25,17 +27,17 @@ def rows(db: Path, sql: str, params=()) -> list[dict]:
         return [dict(r) for r in con.execute(sql, params)]
 
 
-def pick_step(from_ms: int, to_ms: int, step: int | None) -> int:
-    if step in STEPS:
-        return step
+def pick_step(from_ms: int, to_ms: int, step: int | None, cap: int = MAX_POINTS) -> int:
+    """The requested step, but never finer than what keeps the answer under `cap` points."""
     span = max(1, (to_ms - from_ms) // 1000)
-    return next((s for s in STEPS if span / s <= MAX_POINTS), STEPS[-1])
+    floor = next((s for s in STEPS if span / s <= cap), STEPS[-1])
+    return max(step, floor) if step in STEPS else floor
 
 
 def samples(db, from_ms: int, to_ms: int, step: int | None, probe: str | None = None, now_ms: int | None = None) -> dict:
     import time
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    step = pick_step(from_ms, to_ms, step)
+    step = pick_step(from_ms, to_ms, step, CHART_POINTS // 4)   # per pair: keep the answer small (the UI uses /api/chart)
     table = "samples_1s" if from_ms > now_ms - ONE_S_KEPT_MS and step < 60 else "samples_1m"  # 1 s rows live 7 days
     if table == "samples_1m":
         step = max(step, 60)
@@ -109,3 +111,42 @@ def add_annotation(db, start_ms: int, end_ms: int | None, label: str, note: str 
         cur = con.execute("INSERT INTO annotations (agent_id, start_ms, end_ms, label, note) VALUES (1, ?, ?, ?, ?)",
                           (start_ms, end_ms, label, (note or "")[:500]))
         return cur.lastrowid
+
+
+def chart(db, from_ms: int, to_ms: int, step: int | None, now_ms: int | None = None) -> dict:
+    """Columnar series for the lanes, bucketed in SQL by probe (not per pair): x, up, down, lost, rtt, canary."""
+    import time
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    step = pick_step(from_ms, to_ms, step, CHART_POINTS)
+    table = "samples_1s" if from_ms > now_ms - ONE_S_KEPT_MS and step < 60 else "samples_1m"
+    if table == "samples_1m":
+        step = max(step, 60)
+    marks = ",".join("?" * len(CHART_PROBES))
+    sql = (f"SELECT (ts_ms / {step * 1000}) AS b, probe, SUM(sent), SUM(ok), SUM(lost), SUM(lost_up), SUM(lost_down), "
+           "SUM(rtt_avg * ok), SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END) "
+           f"FROM {table} WHERE ts_ms >= ? AND ts_ms < ? AND probe IN ({marks}) GROUP BY b, probe ORDER BY b")
+    by: dict[int, dict] = {}
+    if db is not None and Path(db).exists():
+        with closing(connect(db)) as con:
+            for b, probe, sent, ok, lost, up, down, rtt_sum, rtt_n in con.execute(sql, (from_ms, to_ms, *CHART_PROBES)):
+                d = by.setdefault(b * step, {"up": 0, "down": 0, "lost": 0, "rs": 0.0, "rn": 0, "cs": 0, "co": 0})
+                if probe == "udp_stream":
+                    d["up"] += up or 0
+                    d["down"] += down or 0
+                    d["lost"] += lost or 0
+                elif probe == "canary":
+                    d["cs"] += sent or 0
+                    d["co"] += ok or 0
+                else:
+                    d["basic_lost"] = d.get("basic_lost", 0) + (lost or 0)
+                    if rtt_n:
+                        d["rs"] += rtt_sum or 0
+                        d["rn"] += rtt_n
+    xs = sorted(by)
+    col = lambda f: [f(by[x]) for x in xs]  # noqa: E731
+    return {"step_s": step, "table": table, "x": xs,
+            "up": col(lambda d: d["up"] or None), "down": col(lambda d: -d["down"] if d["down"] else None),
+            "stream_unknown": col(lambda d: max(0, d["lost"] - d["up"] - d["down"]) or None),
+            "basic_lost": col(lambda d: d.get("basic_lost") or None),
+            "rtt": col(lambda d: round(d["rs"] / d["rn"], 1) if d["rn"] else None),
+            "tcp": col(lambda d: (2 if d["co"] == d["cs"] else 1 if d["co"] else 0) if d["cs"] else None)}

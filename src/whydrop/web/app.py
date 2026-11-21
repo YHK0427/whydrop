@@ -1,27 +1,31 @@
-"""The FastAPI app: API routes, /ws and the static dashboard, behind the guards (spec §8)."""
+"""The FastAPI app: API routes, /ws and the static dashboard, behind the guards (spec §8).
+
+Every response body is built and serialized in a worker thread: the app shares its event loop with the probes, and a
+few megabytes of JSON encoded on the loop would delay them (and distort what the dashboard shows)."""
 import asyncio
+import json
+import mimetypes
 import sqlite3
 import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from whydrop.web import export as X
 from whydrop.web import queries as Q
 from whydrop.web.bus import Bus
-from whydrop.web.guard import Guard
-from whydrop.web.public import mask_text
+from whydrop.web.guard import Guard, HostGuard
 from whydrop.web.public import public as to_public
 
 STATIC = Path(__file__).with_name("static")
-
+mimetypes.add_type("text/javascript", ".js")   # some Windows registries map .js to text/plain (ES modules then refuse to load)
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 DAY_MS = 86_400_000
-WS_KIND = {"sample": "sample", "segment": "segment", "incident": "incident", "condition": "condition",
-           "event": "event", "finding": "finding", "annotation": "annotation"}
+WS_KIND = {"segment": "segment", "incident": "incident", "condition": "condition", "event": "event",
+           "finding": "finding", "annotation": "annotation"}
 
 
 def public_message(msg: dict, now_ms: int) -> dict:
@@ -34,6 +38,10 @@ def public_message(msg: dict, now_ms: int) -> dict:
 
 def _now() -> int:
     return int(time.time() * 1000)
+
+
+def _dumps(obj) -> bytes:
+    return json.dumps(obj, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
 
 
 def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str], public_default: bool,
@@ -59,92 +67,117 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             raise HTTPException(400, "from must be before to")
         return frm, to
 
-    def out(request: Request, rows, kind: str):
-        if is_public(request):
-            now = _now()
-            return [to_public(r, kind, now) for r in rows]
-        return rows
+    async def reply(request: Request, fetch, kind: str | None = None, *, one: bool = False, headers=None) -> Response:
+        """fetch() and, in public view, the allowlist and the JSON encoding all run in a worker thread."""
+        pub, now = is_public(request), _now()
 
-    async def run(fn, *a):
-        return await asyncio.to_thread(fn, *a)
+        def work():
+            data = fetch()
+            if data is None:
+                return None
+            if kind and pub:
+                data = [to_public(r, kind, now) for r in data]
+            if one:
+                data = data[0] if data else None
+            return _dumps(data)
+        body = await asyncio.to_thread(work)
+        if body is None or body == b"null":
+            raise HTTPException(404, "not found")
+        return Response(body, media_type="application/json", headers=headers)
 
     @app.get("/api/status")
     async def get_status(request: Request):
-        st = status() if status else {}
-        frm = int(time.mktime(time.localtime()[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)  # start of this month
-        st = {**st, "month": await run(Q.availability, db_path, frm, _now())}
-        return to_public(st, "status", _now()) | {"month": st["month"]} if is_public(request) else st
+        st = {**(status() if status else {}), "public": is_public(request)}
+        frm = int(time.mktime(time.localtime()[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)  # start of this month (local)
+        st["month"] = await asyncio.to_thread(Q.availability, db_path, frm, _now())
+        if is_public(request):
+            st = to_public(st, "status", _now()) | {"month": st["month"], "public": True}
+        return Response(_dumps(st), media_type="application/json")
+
+    @app.get("/api/chart")
+    async def get_chart(request: Request):
+        """What the lanes draw, already bucketed and columnar: a few kB instead of every per-pair row."""
+        frm, to = span(request, 3_600_000)
+        step = request.query_params.get("step")
+        return await reply(request, lambda: Q.chart(db_path, frm, to, int(step) if step and step.isdigit() else None))
 
     @app.get("/api/samples")
     async def get_samples(request: Request):
         frm, to = span(request, 3_600_000)
         step = request.query_params.get("step")
-        res = await run(Q.samples, db_path, frm, to, int(step) if step and step.isdigit() else None,
-                        request.query_params.get("probe"))
-        return {**res, "rows": out(request, res["rows"], "sample")}
+        pub, now = is_public(request), _now()
+
+        def work():
+            res = Q.samples(db_path, frm, to, int(step) if step and step.isdigit() else None, request.query_params.get("probe"))
+            if pub:
+                res["rows"] = [to_public(r, "sample", now) for r in res["rows"]]
+            return _dumps(res)
+        return Response(await asyncio.to_thread(work), media_type="application/json")
 
     @app.get("/api/segments")
     async def get_segments(request: Request):
         frm, to = span(request)
-        return out(request, await run(Q.ranged, db_path, "segments", frm, to), "segment")
+        return await reply(request, lambda: Q.ranged(db_path, "segments", frm, to), "segment")
 
     @app.get("/api/incidents")
     async def get_incidents(request: Request):
         frm, to = span(request, 30 * DAY_MS)
-        return out(request, await run(Q.overlapping, db_path, "incidents", frm, to), "incident")
+        return await reply(request, lambda: Q.overlapping(db_path, "incidents", frm, to), "incident")
 
     @app.get("/api/incidents/{iid}")
     async def get_incident(iid: int, request: Request):
-        inc = await run(Q.incident, db_path, iid)
-        if inc is None:
-            raise HTTPException(404, "no such drop")
-        return out(request, [inc], "incident")[0]
+        return await reply(request, lambda: [r for r in [Q.incident(db_path, iid)] if r], "incident", one=True)
 
     @app.get("/api/incidents/{iid}/summary")
     async def get_summary(iid: int, request: Request):
-        text = await run(X.summary, db_path, iid, request.query_params.get("lang", "en"))
+        text = await asyncio.to_thread(X.summary, db_path, iid, request.query_params.get("lang", "en"), is_public(request))
         if text is None:
             raise HTTPException(404, "no such drop")
-        return PlainTextResponse(mask_text(text) if is_public(request) else text)
+        return PlainTextResponse(text)
 
     @app.get("/api/incidents/{iid}/strip")
-    async def get_strip(iid: int):
+    async def get_strip(iid: int, request: Request):
         """Per-packet record kept ±60 s around the drop (precision mode only)."""
-        inc = await run(Q.incident, db_path, iid)
-        if inc is None:
-            raise HTTPException(404, "no such drop")
-        a, b = inc["start_ms"] - 60_000, (inc["end_ms"] or _now()) + 60_000
-        return await run(Q.rows, db_path, "SELECT ts_ms, seq, echoed, dir FROM udp_seq_ring WHERE ts_ms >= ? AND ts_ms <= ? "
-                                         "ORDER BY seq LIMIT 3000", (a, b))
+        def fetch():
+            inc = Q.incident(db_path, iid)
+            if inc is None:
+                return None
+            a, b = inc["start_ms"] - 60_000, (inc["end_ms"] or _now()) + 60_000
+            return Q.rows(db_path, "SELECT ts_ms, seq, echoed, dir FROM udp_seq_ring WHERE ts_ms >= ? AND ts_ms <= ? "
+                                   "ORDER BY seq LIMIT 3000", (a, b))
+        return await reply(request, fetch, "strip")
 
     @app.get("/api/conditions")
     async def get_conditions(request: Request):
         frm, to = span(request, 7 * DAY_MS)
-        return out(request, await run(Q.overlapping, db_path, "conditions", frm, to), "condition")
+        return await reply(request, lambda: Q.overlapping(db_path, "conditions", frm, to), "condition")
 
     @app.get("/api/events")
     async def get_events(request: Request):
         frm, to = span(request)
         kind = request.query_params.get("kind")
         extra, params = ("AND kind = ?", (kind,)) if kind else ("", ())
-        return out(request, await run(Q.ranged, db_path, "events", frm, to, "ts_ms", extra, params), "event")
+        return await reply(request, lambda: Q.ranged(db_path, "events", frm, to, "ts_ms", extra, params), "event")
 
     @app.get("/api/findings")
     async def get_findings(request: Request):
         frm, to = span(request, 365 * DAY_MS)
-        return out(request, await run(Q.overlapping, db_path, "findings", frm, to), "finding")
+        return await reply(request, lambda: Q.overlapping(db_path, "findings", frm, to), "finding")
 
     @app.get("/api/selfcheck")
     async def get_selfcheck(request: Request):
-        r = await run(Q.rows, db_path, "SELECT * FROM selfcheck ORDER BY id DESC LIMIT 1")
-        return out(request, r, "selfcheck")
+        return await reply(request, lambda: Q.rows(db_path, "SELECT * FROM selfcheck ORDER BY id DESC LIMIT 1"), "selfcheck")
 
     @app.get("/api/nat")
     async def get_nat(request: Request):
-        runs = await run(Q.rows, db_path, "SELECT * FROM nat_runs ORDER BY id DESC LIMIT 5")
-        results = await run(Q.rows, db_path, "SELECT * FROM nat_results WHERE run_id = ?", (runs[0]["id"],)) if runs else []
-        return {"running": nat_state() if nat_state else None, "last_run": runs[0] if runs and not is_public(request) else None,
-                "results": out(request, results, "nat")}
+        pub = is_public(request)
+
+        def work():
+            runs = Q.rows(db_path, "SELECT * FROM nat_runs ORDER BY id DESC LIMIT 5")
+            results = Q.rows(db_path, "SELECT * FROM nat_results WHERE run_id = ?", (runs[0]["id"],)) if runs else []
+            return _dumps({"running": nat_state() if nat_state else None, "last_run": runs[0] if runs and not pub else None,
+                           "results": [to_public(r, "nat", 0) for r in results] if pub else results})
+        return Response(await asyncio.to_thread(work), media_type="application/json")
 
     @app.post("/api/nat/run")
     async def post_nat_run():
@@ -157,24 +190,24 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     @app.get("/api/gaps")
     async def get_gaps(request: Request):
         frm, to = span(request, 30 * DAY_MS)
-        return out(request, await run(Q.gaps, db_path, frm, to), "gap")
+        return await reply(request, lambda: Q.gaps(db_path, frm, to), "gap")
 
     @app.get("/api/annotations")
     async def get_annotations(request: Request):
         frm, to = span(request, 30 * DAY_MS)
-        r = await run(Q.rows, db_path, "SELECT * FROM annotations WHERE start_ms < ? AND COALESCE(end_ms, start_ms) >= ? "
-                                       "ORDER BY start_ms", (to, frm))
-        return out(request, r, "annotation")
+        return await reply(request, lambda: Q.rows(
+            db_path, "SELECT * FROM annotations WHERE start_ms < ? AND COALESCE(end_ms, start_ms) >= ? ORDER BY start_ms",
+            (to, frm)), "annotation")
 
     @app.post("/api/annotations")
     async def post_annotation(request: Request):
         try:
+            if len(await request.body()) > 4096:
+                raise ValueError("annotation too large")
             body = await request.json()
             start = int(body["start_ms"])
             end = int(body["end_ms"]) if body.get("end_ms") is not None else None
-            if len(await request.body()) > 4096:
-                raise ValueError("annotation too large")
-            rid = await run(Q.add_annotation, db_path, start, end, str(body.get("label")), body.get("note"))
+            rid = await asyncio.to_thread(Q.add_annotation, db_path, start, end, str(body.get("label")), body.get("note"))
         except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as e:
             raise HTTPException(400, str(e) or "bad annotation")
         except (FileNotFoundError, sqlite3.Error):
@@ -184,25 +217,29 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         return {"id": rid}
 
     @app.get("/api/packets")
-    async def get_packets():
-        return packets() if packets else []
+    async def get_packets(request: Request):
+        return await reply(request, lambda: packets() if packets else [], "packet")
 
     @app.get("/api/export/bugreport/{iid}")
-    async def get_bugreport(iid: int):
-        rep = await run(X.bugreport, db_path, iid, _now())
-        if rep is None:
+    async def get_bugreport(iid: int, request: Request):
+        def work():
+            rep = X.bugreport(db_path, iid, _now())
+            return None if rep is None else _dumps(rep)
+        body = await asyncio.to_thread(work)
+        if body is None:
             raise HTTPException(404, "no such drop")
-        return JSONResponse(rep, headers={"content-disposition": f'attachment; filename="whydrop-bugreport-{iid}.json"'})
+        return Response(body, media_type="application/json",
+                        headers={"content-disposition": f'attachment; filename="whydrop-bugreport-{iid}.json"'})
 
     @app.get("/api/export/{name}.{fmt}")
     async def get_export(name: str, fmt: str, request: Request):
         if name not in X.TABLES or fmt not in ("csv", "json"):
             raise HTTPException(404, "export incidents|conditions|samples_1m|events as .csv or .json")
         frm, to = span(request, 30 * DAY_MS)
-        pub, now = is_public(request), _now()
-        body, ctype = await run(lambda: X.render(name, X.table_rows(db_path, name, frm, to), fmt, pub, now))  # off the loop
-        return Response(body, media_type=ctype,
-                        headers={"content-disposition": f'attachment; filename="whydrop-{name}.{fmt}"'})
+        # a sync generator: Starlette iterates it in a worker thread, row by row from the cursor (no big list in memory)
+        return StreamingResponse(X.stream(db_path, name, frm, to, fmt, is_public(request), _now()),
+                                 media_type="application/json" if fmt == "json" else "text/csv; charset=utf-8",
+                                 headers={"content-disposition": f'attachment; filename="whydrop-{name}.{fmt}"'})
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
@@ -234,5 +271,5 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     app.add_middleware(Guard, token=token)
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)  # added last = runs first
+    app.add_middleware(HostGuard, allowed_hosts=allowed_hosts)  # added last = runs first
     return app

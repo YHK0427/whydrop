@@ -1,6 +1,6 @@
 // Protocol (#/protocol): recent WD/WT packets as hex with each field named as in docs/protocol (UI design doc §5.4).
 import { live } from "../app.js";
-import { api, clock, h, t } from "../lib.js";
+import { api, clock, h, t, tsMs } from "../lib.js";
 
 // WD (44 B): !2sBBIIQIIII + hmac8 — field names as in docs/protocol
 const WD = [["magic", 2], ["version", 1], ["type", 1], ["session_id", 4], ["seq", 4], ["t_send_ns", 8], ["recv_count", 4],
@@ -25,7 +25,7 @@ export async function mount(main) {
   const body = h("tbody"), detail = h("div");
   const draw = () => {
     body.replaceChildren(...packets.slice(-200).reverse().map(p => {
-      const tr = h("tr", { tabindex: "0" }, h("td", {}, clock(p.ts_ms)), h("td", {}, p.dir), h("td", {}, p.type), h("td", {}, p.seq),
+      const tr = h("tr", { tabindex: "0" }, h("td", {}, clock(tsMs(p))), h("td", {}, p.dir), h("td", {}, p.type), h("td", {}, p.seq),
         h("td", {}, `${p.size} B`));
       const open = () => detail.replaceChildren(h("h3", {}, `${p.type} seq ${p.seq}`), hexdump(p.hex || ""));
       tr.addEventListener("click", open);
@@ -42,7 +42,10 @@ export async function mount(main) {
     h("table", { class: "data" }, h("thead", {}, h("tr", {}, ["time", "dir", "type", "seq", "size"].map(c => h("th", { scope: "col" }, t(`proto.col.${c}`))))), body)),
     h("section", { class: "panel" }, detail));
   draw();
-  const poll = setInterval(async () => { if (!paused) { packets = await api("/api/packets").catch(() => packets); draw(); } }, 2000);
+  const poll = setInterval(async () => {
+    if (paused || body.contains(document.activeElement)) return;   // never yank the row someone is on
+    packets = await api("/api/packets").catch(() => packets); draw();
+  }, 2000);
   cleanup.push(() => clearInterval(poll));
 }
 

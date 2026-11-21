@@ -154,5 +154,6 @@
   "ev.provisional": "First diagnosis",
   "ev.cause_classes": "DNS classes",
   "ev.interval_s": "Idle interval (s)",
-  "net.availability.sub_one": "1 drop, {dur}"
+  "net.availability.sub_one": "1 drop, {dur}",
+  "test.hint_remote": "Want proof it works? Unplug the router's internet cable for 10 seconds after pressing this."
 }

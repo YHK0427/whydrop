@@ -14,8 +14,10 @@ AXE = Path(__file__).with_name("vendor") / "axe.min.js"
 SCREENS = {"now": "#/", "drops": "#/drops", "drop": "#/drop/1", "nat": "#/nat", "protocol": "#/protocol", "network": "#/network"}
 
 
-@pytest.fixture(scope="module")
-def base(tmp_path_factory):
+TOKEN = "uiTest_token_1234567890"
+
+
+def _serve(tmp_path_factory, token=None):
     import uvicorn
 
     from fixture import build
@@ -27,7 +29,7 @@ def base(tmp_path_factory):
     th.start()
     th.join()
     st = box["st"]
-    app = create_app(db, Bus(), token=None, allowed_hosts=["127.0.0.1"], public_default=False,
+    app = create_app(db, Bus(), token=token, allowed_hosts=["127.0.0.1"], public_default=False,
                      status=lambda: {**st, "now_ms": int(time.time() * 1000)}, nat_run=lambda: True)
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
@@ -38,7 +40,20 @@ def base(tmp_path_factory):
         if server.started:
             break
         time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
+    return f"http://127.0.0.1:{port}", server
+
+
+@pytest.fixture(scope="module")
+def base(tmp_path_factory):
+    url, server = _serve(tmp_path_factory)
+    yield url
+    server.should_exit = True
+
+
+@pytest.fixture(scope="module")
+def base_token(tmp_path_factory):
+    url, server = _serve(tmp_path_factory, TOKEN)
+    yield url
     server.should_exit = True
 
 
@@ -101,3 +116,25 @@ def test_korean_phone_width_has_no_horizontal_scroll(browser, base):
         overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
         ctx.close()
         assert overflow <= 1, (name, overflow)
+
+
+def test_real_csp_and_token_flow(browser, base_token):
+    """No CSP bypass here: the page must work under its own CSP, take the token from the link, drop it from the URL,
+    and use it for the API and the WebSocket."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    errors = []
+    page.on("console", lambda m: m.type == "error" and errors.append(m.text))
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{base_token}/?token={TOKEN}#/")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+    assert "token" not in page.url
+    assert page.locator("h1.status").inner_text()
+    assert page.evaluate("() => sessionStorage.getItem('whydrop.token')") == TOKEN
+    page.wait_for_function("() => true")
+    page.goto(f"{base_token}/#/drop/1")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(400)
+    assert "dropped" in page.locator("h1.headline").inner_text() and not errors, errors
+    ctx.close()

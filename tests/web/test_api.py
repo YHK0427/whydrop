@@ -52,8 +52,8 @@ def client(db, **kw):
 
 def test_samples_downsampling_keeps_loss(db):
     c = client(db)
-    one = c.get(f"/api/samples?from={NOW - 600_000}&to={NOW}&step=1&probe=line_hb").json()
-    ten = c.get(f"/api/samples?from={NOW - 600_000}&to={NOW}&step=10&probe=line_hb").json()
+    one = c.get(f"/api/samples?from={NOW - 600_000}&to={NOW - 300_000}&step=1&probe=line_hb").json()  # 300 points: 1 s holds
+    ten = c.get(f"/api/samples?from={NOW - 600_000}&to={NOW - 300_000}&step=10&probe=line_hb").json()
     assert one["step_s"] == 1 and ten["step_s"] == 10
     assert sum(r["lost"] for r in one["rows"]) == sum(r["lost"] for r in ten["rows"]) == 5
 
@@ -129,3 +129,10 @@ def test_bugreport_is_public(db):
 def test_bad_range_400(db):
     assert client(db).get("/api/incidents?from=abc").status_code == 400
     assert client(db).get(f"/api/incidents?from={NOW}&to={NOW - 1}").status_code == 400
+
+
+def test_public_summary_has_no_absolute_time_or_address(db):
+    c = client(db)
+    iid = c.get("/api/incidents").json()[0]["id"]
+    t = c.get(f"/api/incidents/{iid}/summary?public=1").text
+    assert "min ago" in t and not re.search(r"\d{4}-\d{2}-\d{2}", t) and "192.168.0.1" not in t and "203.0.113" not in t

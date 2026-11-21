@@ -3,28 +3,17 @@
 import uPlot from "../vendor/uplot/uPlot.esm.js";
 import { clock, h, t, tsMs } from "../lib.js";
 
-const LINE_PROBES = new Set(["line_hb", "stun", "tcp_connect"]);
+
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
-export function series(rows, stepS, mode) {
-  const by = new Map();
-  for (const r of rows) {
-    const ts = Math.floor(tsMs(r) / 1000 / stepS) * stepS;
-    if (!by.has(ts)) by.set(ts, { up: 0, down: 0, lost: 0, rttSum: 0, rttN: 0, cSent: 0, cOk: 0 });
-    const b = by.get(ts);
-    if (r.probe === "udp_stream") { b.up += r.lost_up || 0; b.down += r.lost_down || 0; b.lost += r.lost || 0; }
-    if (mode === "basic" && LINE_PROBES.has(r.probe)) b.lost += r.lost || 0;
-    if (LINE_PROBES.has(r.probe) && r.rtt_avg != null) { b.rttSum += r.rtt_avg * (r.ok || 1); b.rttN += r.ok || 1; }
-    if (r.probe === "canary") { b.cSent += r.sent || 0; b.cOk += r.ok || 0; }
-  }
-  const xs = [...by.keys()].sort((a, b) => a - b);
-  const get = (f) => xs.map(x => f(by.get(x)));
+export function series(c, mode) {
+  // /api/chart is already bucketed and columnar; the lanes only pick the loss source and smooth the latency
+  const stepS = c.step_s;
   return {
-    x: xs,
-    up: get(b => b.up || null), down: get(b => (b.down ? -b.down : null)),
-    unknown: get(b => (mode === "basic" ? b.lost : Math.max(0, b.lost - b.up - b.down)) || null),
-    rtt: smooth(get(b => (b.rttN ? +(b.rttSum / b.rttN).toFixed(1) : null)), stepS < 10 ? Math.round(10 / stepS) : 1),
-    tcp: get(b => (b.cSent ? (b.cOk === b.cSent ? 2 : b.cOk ? 1 : 0) : null)),   // 2 ok, 1 retransmitting, 0 stall
+    x: c.x, up: c.up, down: c.down,
+    unknown: mode === "basic" ? c.basic_lost : c.stream_unknown,
+    rtt: smooth(c.rtt, stepS < 10 ? Math.round(10 / stepS) : 1),
+    tcp: c.tcp,
   };
 }
 
@@ -58,6 +47,8 @@ function lane(title, sub, legend, makeChart, tableView) {
     showTable = !showTable;
     btn.textContent = showTable ? t("lane.chart") : t("lane.table");
     btn.setAttribute("aria-pressed", String(showTable));
+    box._chart?.destroy();
+    box._chart = null;
     box.replaceChildren(showTable ? tableView() : "");
     if (!showTable) makeChart(box);
   });
@@ -75,7 +66,7 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
   const charts = [];
   const root = h("div", { class: "lanes" });
   const mk = (opts, d) => (box) => { const u = new uPlot({ width: width(box), height: opts.height, cursor, legend: { show: false },
-    scales: { x: { time: true } }, ...opts }, d, box); charts.push(u); };
+    scales: { x: { time: true } }, ...opts }, d, box); box._chart = u; charts.push(u); };
   const stepWord = stepS === 1 ? t("unit.s", { n: 1 }) : stepS < 60 ? t("unit.s", { n: stepS }) : t("unit.min", { n: stepS / 60 });
 
   const precision = mode === "precision";
@@ -134,8 +125,8 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
       h("p", { class: "faint" }, t("lane.tcp.basic")));
   }
   root.append(loss, latency, tcp);
-  const onResize = () => charts.forEach(u => u.setSize({ width: width(u.root.parentElement), height: u.height }));
+  const onResize = () => charts.forEach(u => u.root.isConnected && u.setSize({ width: width(u.root.parentElement), height: u.height }));
   window.addEventListener("resize", onResize);
-  root.cleanup = () => { window.removeEventListener("resize", onResize); charts.forEach(u => u.destroy()); };
+  root.cleanup = () => { window.removeEventListener("resize", onResize); charts.forEach(u => { try { u.destroy(); } catch {} }); };
   return root;
 }

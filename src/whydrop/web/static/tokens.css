@@ -79,6 +79,8 @@ h3 { font-size: 15px; font-weight: 600; }
 .banner.bad { border-left-color: var(--critical); }
 .labelbanner { padding: var(--s2) var(--s4); background: var(--surface); border: 1px dashed var(--ink-3); margin-bottom: var(--s3);
   font-weight: 600; }
+.copybox { width: 100%; font: 13px/1.5 var(--mono); margin: var(--s3) 0; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); padding: var(--s2); }
 .toast { position: fixed; bottom: var(--s5); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--page);
   padding: var(--s2) var(--s4); border-radius: 6px; }
 .publicbadge { position: fixed; right: var(--s3); bottom: var(--s3); background: var(--surface); border: 1px solid var(--rule);

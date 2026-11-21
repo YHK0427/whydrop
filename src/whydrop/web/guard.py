@@ -1,7 +1,9 @@
 """Host, origin, token and write guards (spec §8 "Protections" and "Bind and token")."""
 import hmac
+import ipaddress
 import json
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -18,16 +20,18 @@ SECURITY_HEADERS = [
 
 
 MIN_TOKEN = 16
+TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")   # survives URLs, headers and WebSocket subprotocols
 
 
 def resolve_token(bind_host: str, env, data_dir: Path) -> str | None:
     """No token on a loopback bind; otherwise WHYDROP_UI_TOKEN (≥ 16 characters), or one generated once and kept
     (mode 600, written atomically)."""
     given = (env.get("WHYDROP_UI_TOKEN") or "").strip()
-    if len(given) >= MIN_TOKEN:
-        return given
+    if given and not TOKEN_RE.match(given):
+        raise ValueError("WHYDROP_UI_TOKEN must be at least 16 characters of A-Z a-z 0-9 _ - "
+                         "(e.g. python -c \"import secrets; print(secrets.token_urlsafe(32))\")")
     if given:
-        raise ValueError(f"WHYDROP_UI_TOKEN must be at least {MIN_TOKEN} characters")
+        return given
     if bind_host in LOOPBACK:
         return None
     path = Path(data_dir) / "ui-token"
@@ -116,3 +120,39 @@ class Guard:
         protos = scope.get("subprotocols", [])
         tok = next((p for p in protos if p != "whydrop"), None)
         return same and "whydrop" in protos and self._ok(tok)
+
+
+class HostGuard:
+    """Host header check (DNS-rebinding defence): the configured names, or an IP literal equal to the address this
+    connection actually arrived on — so a DHCP change or a router that came up after us doesn't lock the LAN out.
+    Rebinding needs a hostname, never a literal."""
+
+    def __init__(self, app, allowed_hosts: list[str]):
+        self.app, self.allowed = app, {h.lower().strip("[]") for h in allowed_hosts}
+
+    @staticmethod
+    def _host(value: str) -> str:
+        value = value.strip().lower()
+        if value.startswith("["):                       # [v6]:port
+            return value[1:value.find("]")] if "]" in value else value
+        return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            host = self._host(_headers(scope).get(b"host", b"").decode("latin-1"))
+            arrived = (scope.get("server") or ("", 0))[0]
+            literal_ok = False
+            try:
+                literal_ok = ipaddress.ip_address(host) == ipaddress.ip_address(arrived)
+            except ValueError:
+                pass
+            if host not in self.allowed and not literal_ok:
+                if scope["type"] == "websocket":
+                    await receive()
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                await send({"type": "http.response.start", "status": 400,
+                            "headers": [(b"content-type", b"text/plain"), *SECURITY_HEADERS]})
+                await send({"type": "http.response.body", "body": b"Invalid host header"})
+                return
+        await self.app(scope, receive, send)

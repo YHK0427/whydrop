@@ -3,7 +3,10 @@ for an ISP support chat (private view: absolute local time with its UTC offset).
 import csv
 import io
 import json
+import time
 from datetime import datetime, timezone
+
+from pathlib import Path
 
 from whydrop.web import queries as Q
 from whydrop.web.public import public
@@ -47,10 +50,12 @@ def bugreport(db, iid: int, now_ms: int) -> dict | None:
     return {"whydrop_bugreport": 1, "incident": public(inc, "incident", now_ms),
             "segments": [public(r, "segment", now_ms) for r in Q.ranged(db, "segments", a, b)],
             "events": [public(r, "event", now_ms) for r in Q.ranged(db, "events", a, b) if r["kind"] != "tcp_info"],
-            "samples": [public(r, "sample", now_ms) for r in Q.ranged(db, "samples_1s", a, b, limit=200_000)]}
+            "samples": [public(r, "sample", now_ms) for r in Q.rows(
+                db, "SELECT * FROM samples_1s WHERE ts_ms >= ? AND ts_ms < ? AND probe IN "
+                    "('udp_stream','line_hb','stun','tcp_connect','canary','gateway') ORDER BY ts_ms LIMIT 60000", (a, b))]}
 
 
-def summary(db, iid: int, lang: str = "en") -> str | None:
+def summary(db, iid: int, lang: str = "en", public_view: bool = False) -> str | None:
     """Ready to paste into an ISP support chat: time with offset, duration, likely cause, next step, evidence."""
     inc = Q.incident(db, iid)
     if inc is None:
@@ -61,6 +66,11 @@ def summary(db, iid: int, lang: str = "en") -> str | None:
     dur = ((inc["end_ms"] or inc["start_ms"]) - inc["start_ms"]) / 1000
     where = ", ".join(dict.fromkeys(words.get(s, s) for s in tags.get("segments", []))) or tags.get("point") or "-"
     when = start.strftime("%Y-%m-%d %H:%M:%S %z")
+    if public_view:   # no absolute time or address in the public view
+        from whydrop.web.public import mask_text
+        mins = max(0, round((time.time() * 1000 - inc["start_ms"]) / 60000))
+        when = f"{mins} min ago" if lang != "ko" else f"{mins}분 전"
+        ev = {k: mask_text(v) if isinstance(v, str) else v for k, v in ev.items()}
     if lang == "ko":
         lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"추정 원인: {ev.get('label', '-')}",
                  f"다음에 할 일: {ev.get('next_step', '-')}"]
@@ -73,3 +83,40 @@ def summary(db, iid: int, lang: str = "en") -> str | None:
             lines.append(f"In protocol terms: {ev['protocol']}")
     lines.append("Recorded by whydrop (rule " + str(inc.get("cause_final") or inc.get("primary_cause")) + ")")
     return "\n".join(lines)
+
+
+def stream(db, name: str, from_ms: int, to_ms: int, fmt: str, pub: bool, now_ms: int):
+    """Yield the export row by row straight from the cursor (a sync generator; Starlette runs it in a thread)."""
+    from contextlib import closing
+    table = TABLES[name]
+    where = ("start_ms < ? AND (end_ms IS NULL OR end_ms >= ?)", (to_ms, from_ms)) if name in ("incidents", "conditions") \
+        else ("ts_ms >= ? AND ts_ms < ?", (from_ms, to_ms))
+    if db is None or not Path(db).exists():
+        yield "[]" if fmt == "json" else ""
+        return
+    with closing(Q.connect(db)) as con:
+        cur = con.execute(f"SELECT * FROM {table} WHERE {where[0]} ORDER BY rowid", where[1])
+        cols = [c[0] for c in cur.description if c[0] != "agent_id"]
+        first = True
+        if fmt == "json":
+            yield "["
+        for raw in cur:
+            r = {k: raw[k] for k in cols}
+            if pub:
+                r = public(r, KIND[name], now_ms)
+            if fmt == "json":
+                yield ("" if first else ",") + json.dumps(r, ensure_ascii=False, default=str)
+            else:
+                if first:
+                    hdr = sorted(r)
+                    buf = io.StringIO()
+                    w = csv.DictWriter(buf, fieldnames=hdr, extrasaction="ignore")
+                    w.writeheader()
+                    yield buf.getvalue()
+                buf = io.StringIO()
+                csv.DictWriter(buf, fieldnames=hdr, extrasaction="ignore").writerow(
+                    {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for k, v in r.items()})
+                yield buf.getvalue()
+            first = False
+        if fmt == "json":
+            yield "]"

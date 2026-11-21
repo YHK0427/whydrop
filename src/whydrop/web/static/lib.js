@@ -3,7 +3,8 @@ const store = (() => { try { return window.sessionStorage; } catch { return null
 const prefs = (() => { try { return window.localStorage; } catch { return null; } })();
 
 export const params = new URLSearchParams(location.search);
-export const isPublic = params.get("public") === "1";
+export let isPublic = params.get("public") === "1";
+export function setPublic(v) { isPublic = isPublic || !!v; }   // web.public_view_default on the server
 
 // ---------- token: moved from ?token= into sessionStorage, then stripped from the URL (spec §8) ----------
 (() => {

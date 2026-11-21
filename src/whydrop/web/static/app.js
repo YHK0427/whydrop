@@ -1,5 +1,5 @@
 // Shell: top bar, hash router, theme/language, the live connection (spec §8, UI design doc §3).
-import { api, dur, h, isPublic, lang, loadLang, prefsGet, prefsSet, t, token } from "./lib.js";
+import { api, dur, h, isPublic, lang, loadLang, prefsGet, prefsSet, setPublic, t, token } from "./lib.js";
 
 const routes = [
   { re: /^#?\/?$/, page: () => import("./pages/now.js"), nav: "now" },
@@ -13,6 +13,7 @@ const NAV = [["now", "#/"], ["drops", "#/drops"], ["nat", "#/nat"], ["protocol",
 
 export const live = { listeners: new Set(), status: null, connected: false };
 let current = null;
+let generation = 0;
 
 function applyTheme(mode) {
   if (mode === "light" || mode === "dark") document.documentElement.dataset.theme = mode;
@@ -53,6 +54,7 @@ function connect(attempt = 0) {
     if (attempt > 0) { setBanner(t("banner.ws_back")); setTimeout(() => setBanner(null), 2000); }
     live.connected = true;
     attempt = 0;
+    for (const fn of live.listeners) fn({ type: "resync" });   // anything missed while away
   };
   ws.onmessage = (e) => { const msg = JSON.parse(e.data); for (const fn of live.listeners) fn(msg); };
   ws.onclose = () => {
@@ -63,7 +65,7 @@ function connect(attempt = 0) {
 }
 
 export async function refreshStatus() {
-  try { live.status = await api("/api/status"); } catch { live.status = null; }
+  try { live.status = await api("/api/status"); setPublic(live.status?.public); } catch { live.status = null; }
   return live.status;
 }
 
@@ -71,6 +73,7 @@ async function render() {
   const hash = location.hash || "#/";
   const route = routes.find(r => r.re.test(hash)) || routes[0];
   const m = hash.match(route.re);
+  const mine = ++generation;
   current?.leave?.();
   const app = document.getElementById("app");
   const head = document.getElementById("head");
@@ -79,8 +82,10 @@ async function render() {
   const main = h("main", { id: "main", tabindex: "-1" });
   app.replaceChildren(main);
   if (isPublic) app.append(h("div", { class: "publicbadge" }, t("badge.public")));
+  if (mine !== generation) return;          // the user navigated again meanwhile
   current = mod;
   await mod.mount(main, { id: m?.[1] && Number(m[1]), refresh: render });
+  if (mine !== generation) mod.leave?.();   // finished mounting after leaving: undo it
   document.title = `whydrop · ${t(`nav.${route.nav}`)}`;
 }
 
@@ -91,6 +96,9 @@ async function render() {
   window.addEventListener("hashchange", render);
   await render();
   connect();
-  setInterval(async () => { await refreshStatus(); document.getElementById("head").replaceChildren(topBar(
-    (routes.find(r => r.re.test(location.hash || "#/")) || routes[0]).nav)); }, 15000);
+  setInterval(async () => {   // only the recording text changes: focus and the header stay put
+    await refreshStatus();
+    const fresh = topBar((routes.find(r => r.re.test(location.hash || "#/")) || routes[0]).nav).querySelector(".rec");
+    document.querySelector("#head .rec")?.replaceWith(fresh);
+  }, 15000);
 })();

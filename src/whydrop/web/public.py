@@ -8,7 +8,7 @@ import re
 KNOWN_RESOLVERS = {"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "149.112.112.112", "208.67.222.222",
                    "208.67.220.220"}
 _V4 = re.compile(r"\b(\d{1,3}(?:\.\d{1,3}){3})(?::\d{1,5})?\b")
-_V6 = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F:]*\b|\b[0-9a-fA-F]{1,4}::[0-9a-fA-F:]*\b")
+_V6 = re.compile(r"(?<![\w:])(?:[0-9a-fA-F:]*::[0-9a-fA-F:]*|(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{1,4})(?![\w:])")  # never hh:mm:ss
 _HOST = re.compile(r"\b(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b")   # FQDNs (reflector, this host)
 _INTERNAL = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
                                                "127.0.0.0/8", "169.254.0.0/16")]  # not is_private: that includes TEST-NETs
@@ -25,7 +25,7 @@ EVENT_DETAIL = {   # kind → detail keys that are safe to show
 }
 INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "events", "provisional",
                      "cause_direction", "cause_lost_up", "cause_lost_down", "cause_classes", "interval_s"}
-STATUS = {"version", "mode", "baseline", "segments", "signal_dbm", "link", "vpn", "analysis_lag_s"}
+STATUS = {"version", "mode", "baseline", "segments", "signal_dbm", "link", "vpn", "analysis_lag_s", "public"}
 
 
 def _ip(m: re.Match) -> str:
@@ -116,6 +116,12 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
                 "verdict": res.get("verdict")}
     if kind == "nat":
         return {k: r[k] for k in ("proto", "delay_s", "alive") if k in r}
+    if kind == "strip":
+        return {"t_s": _rel(r.get("ts_ms"), now_ms), "seq": r.get("seq"), "echoed": r.get("echoed"),
+                "dir": r.get("dir")}
+    if kind == "packet":
+        return {"t_s": _rel(r.get("ts_ms"), now_ms), "dir": r.get("dir"), "type": r.get("type"),
+                "seq": r.get("seq"), "size": r.get("size"), "hex": r.get("hex")}
     if kind == "gap":
         return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms)}
     if kind == "annotation":

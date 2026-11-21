@@ -4,6 +4,7 @@ import { lanes, series } from "../components/lanes.js";
 import { hops, pathDiagram } from "../components/path.js";
 import { api, cause, dur, endMs, errorPanel, h, isPublic, parseIncident, prefsGet, prefsSet, startMs, t, toast, when } from "../lib.js";
 
+const isRemote = () => !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 const RANGES = [["1h", 3600], ["6h", 21600], ["24h", 86400], ["7d", 604800]];
 let cleanup = [];
 
@@ -28,7 +29,7 @@ function lastDrop(drops, st) {
     const since = st?.since_ms ? (Date.now() - st.since_ms) / 1000 : st?.since_s != null ? -st.since_s : 0;
     return h("div", {},
       h("p", { class: "lastdrop" }, t("last.none", { dur: dur(since) })),
-      h("p", { class: "faint" }, t("test.hint")));
+      h("p", { class: "faint" }, t(isRemote() ? "test.hint_remote" : "test.hint")));
   }
   const d = done[0];
   return h("div", { class: "row" },
@@ -54,14 +55,14 @@ export async function mount(main, { refresh }) {
   try {
     [st, incs, conds, findings] = await Promise.all([refreshStatus(), api(`/api/incidents?from=${to - 30 * 86400000}&to=${to}`),
       api(`/api/conditions?from=${from}&to=${to}`), api("/api/findings")]);
-    [samples, events] = await Promise.all([api(`/api/samples?from=${from}&to=${to}`), api(`/api/events?from=${from}&to=${to}&kind=rst`)]);
+    [samples, events] = await Promise.all([api(`/api/chart?from=${from}&to=${to}`), api(`/api/events?from=${from}&to=${to}&kind=rst`)]);
   } catch (e) {
     main.replaceChildren(errorPanel(e, refresh));
     return;
   }
   const drops = incs.map(parseIncident).sort((a, b) => b.start - a.start);
-  const open = drops.find(d => d.open && d.segs.length);
-  const roughNow = conds.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
+  let open = drops.find(d => d.open && d.segs.length);
+  let roughNow = conds.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
   const roughSegs = new Set(conds.filter(c => (c.end_ms ?? c.end_s) == null)
     .map(c => (c.kind === "loss" ? "line" : c.kind === "wifi_lan_loss" || c.kind === "weak_signal" ? (st?.link === "wired" ? "link" : "wifi") : null)));
   const vertical = window.matchMedia("(max-width: 640px)").matches;
@@ -82,7 +83,7 @@ export async function mount(main, { refresh }) {
     } catch (e) { toast(t("error.load", { what: "annotation", code: e.code || "?" })); }
     setTimeout(() => { ev.target.disabled = false; }, 120000);
   } }, t("test.button"));
-  const data = series(samples.rows, samples.step_s, st?.mode || "basic");
+  const data = series(samples, st?.mode || "basic");
   const lanesEl = lanes(data, { stepS: samples.step_s, mode: st?.mode || "basic", baseline: st?.baseline, events });
   cleanup.push(() => lanesEl.cleanup());
   const charts = h("section", { class: "panel" + (vertical ? " charts-collapsed" : "") }, h("div", { class: "row" }, rangeRow, testBtn), lanesEl);
@@ -111,20 +112,23 @@ export async function mount(main, { refresh }) {
 
   let timer = null;
   const onMsg = (msg) => {
-    if (!["incident", "segment", "condition", "finding"].includes(msg.type)) return;
+    if (!["incident", "segment", "condition", "finding", "resync"].includes(msg.type)) return;
     clearTimeout(timer);
     timer = setTimeout(async () => {
       const s2 = await refreshStatus();
-      const list = (await api(`/api/incidents?from=${Date.now() - 30 * 86400000}`)).map(parseIncident);
-      const o2 = list.find(d => d.open && d.segs.length);
-      sentence.textContent = statusSentence(s2, o2, null);
+      const now = Date.now();
+      const [list, c2] = await Promise.all([api(`/api/incidents?from=${now - 30 * 86400000}`), api(`/api/conditions?from=${now - range * 1000}`)]);
+      open = list.map(parseIncident).find(d => d.open && d.segs.length);
+      roughNow = c2.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
+      sentence.textContent = statusSentence(s2, open, roughNow);
       const node = pathDiagram(hops(s2, roughSegs), { onPick: picked, vertical });
       head.querySelector(".path")?.replaceWith(node);
     }, 800);
   };
   live.listeners.add(onMsg);
   const tick = setInterval(() => { if (open) sentence.textContent = statusSentence(live.status, open, roughNow); }, 1000);
-  cleanup.push(() => { live.listeners.delete(onMsg); clearInterval(tick); clearTimeout(timer); });
+  const redraw = range <= 21600 ? setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000) : null;
+  cleanup.push(() => { live.listeners.delete(onMsg); clearInterval(tick); clearTimeout(timer); clearInterval(redraw); });
 }
 
 export function leave() { cleanup.forEach(f => f()); cleanup = []; }

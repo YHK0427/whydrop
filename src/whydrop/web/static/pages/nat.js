@@ -67,5 +67,10 @@ export async function mount(main, { refresh }) {
     ...(hero.length ? hero : [h("p", { class: "empty" }, t("nat.none"))]), h("div", { class: "row" }, btn, progress)),
     rows.length ? h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by)),
       h("table", { class: "data" }, h("tbody", {}, tableRows))) : null);
-  if (running) setTimeout(() => location.hash === "#/nat" && refresh(), 5000);
+  clearTimeout(pollTimer);
+  if (running) pollTimer = setTimeout(() => location.hash === "#/nat" && refresh(), 5000);
+}
+
+let pollTimer = null;
+export function leave() { clearTimeout(pollTimer); pollTimer = null;
 }

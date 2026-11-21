@@ -2,11 +2,28 @@
 import { lanes, series } from "../components/lanes.js";
 import { pathDiagram } from "../components/path.js";
 import { strip } from "../components/strip.js";
-import { api, dur, errorPanel, h, isPublic, parseIncident, segWord, startMs, t, toast, token, when } from "../lib.js";
+import { api, dur, errorPanel, h, parseIncident, startMs, t, toast, token, when } from "../lib.js";
 
 const ORDER = ["host_net", "wifi", "lan", "line", "dns"];
 const REPO_ISSUES = "https://github.com/YHK0427/whydrop/issues/new";
 let cleanup = [];
+
+async function copyText(text) {
+  try { if (navigator.clipboard) { await navigator.clipboard.writeText(text); return true; } } catch { /* fall through */ }
+  const ta = h("textarea", { readonly: true, class: "sr" }, text);
+  document.body.append(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+function showText(main, text) {
+  const box = h("textarea", { readonly: true, rows: 6, class: "copybox", "aria-label": t("drop.copy") }, text);
+  main.querySelector(".copybox")?.remove();
+  main.querySelector(".row")?.after(box);
+  box.focus(); box.select();
+}
 
 function frozenPath(d, link) {
   const down = new Set(d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
@@ -50,10 +67,12 @@ export async function mount(main, { id, refresh }) {
   } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
   const d = parseIncident(raw);
   const from = d.start - 60000, to = (d.end || Date.now()) + 60000;
-  const [samples, events, ringRows] = await Promise.all([
-    api(`/api/samples?from=${from}&to=${to}&step=1`), api(`/api/events?from=${from}&to=${to}`),
-    api(`/api/incidents/${id}/strip`).catch(() => [])]);
-  ann = await api(`/api/annotations?from=${from}&to=${to}`).catch(() => []);
+  let samples, events, ringRows;
+  try {
+    [samples, events, ringRows, ann] = await Promise.all([
+      api(`/api/chart?from=${from}&to=${to}&step=1`), api(`/api/events?from=${from}&to=${to}`),
+      api(`/api/incidents/${id}/strip`).catch(() => []), api(`/api/annotations?from=${from}&to=${to}`).catch(() => [])]);
+  } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
 
   const durS = d.end ? (d.end - d.start) / 1000 : (Date.now() - d.start) / 1000;
   const headline = d.segs.length ? t("drop.headline", { seg: d.segs[0], dur: dur(durS), cause: d.label })
@@ -62,8 +81,11 @@ export async function mount(main, { id, refresh }) {
 
   const actions = h("div", { class: "row" },
     h("button", { class: "btn", type: "button", onclick: async () => {
-      try { await navigator.clipboard.writeText(await api(`/api/incidents/${id}/summary?lang=${document.documentElement.lang}`)); toast(t("drop.copied")); }
-      catch (e) { toast(t("error.load", { what: "summary", code: e.code || "?" })); }
+      let text;
+      try { text = await api(`/api/incidents/${id}/summary?lang=${document.documentElement.lang}`); }
+      catch (e) { toast(t("error.load", { what: "summary", code: e.code || "?" })); return; }
+      if (await copyText(text)) toast(t("drop.copied"));
+      else showText(main, text);   // http://<LAN IP> is not a secure context: no clipboard API there
     } }, t("drop.copy")),
     h("button", { class: "btn", type: "button", onclick: () => download(`/api/export/bugreport/${id}`, `whydrop-bugreport-${id}.json`) },
       t("drop.export_json")),
@@ -74,7 +96,7 @@ export async function mount(main, { id, refresh }) {
       t("drop.wrong")));
 
   const evRows = Object.entries(d.evidence).filter(([k]) => !["label", "next_step", "protocol", "events"].includes(k));
-  const lanesEl = lanes(series(samples.rows, 1, st?.mode || "basic"), { stepS: 1, mode: st?.mode || "basic", baseline: "ready",
+  const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });
   cleanup.push(() => lanesEl.cleanup());
 
