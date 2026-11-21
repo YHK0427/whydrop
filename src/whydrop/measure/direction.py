@@ -21,9 +21,13 @@ class OutageTotals:
     status: Literal["ok", "down_unmeasurable", "unknown"]
 
 
-def packet_direction(seq: int, later: Iterable[Echo]) -> Literal["up", "down", "unknown"]:
-    """For a seq that got no ECHO: the first later ECHO within 32 seqs says whether the reflector saw it."""
-    for e in later:  # callers pass ECHOs from one reflector epoch; a restart starts a new comparison
+def packet_direction(seq: int, later: Iterable[Echo], epoch: int | None = None) -> Literal["up", "down", "unknown"]:
+    """For a seq that got no ECHO: the first later ECHO within 32 seqs says whether the reflector saw it.
+    With `epoch` (the reflector boot ID known when seq was sent), an ECHO from another boot ends the search:
+    a restarted reflector's empty bitmap says nothing about packets sent before the restart."""
+    for e in later:
+        if epoch is not None and e.epoch != epoch:
+            return "unknown"
         gap = e.seq - seq
         if 1 <= gap <= BITMAP_SPAN:
             return "down" if e.rx_bitmap >> (gap - 1) & 1 else "up"

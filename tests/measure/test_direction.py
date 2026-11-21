@@ -45,3 +45,8 @@ def test_totals_no_gap():
 def test_totals_inconsistent_counters_unknown():
     assert outage_totals(Echo(1, 1, 1, 0), Echo(9, 1, 1, 0), 0).status == "unknown"   # b not counted
     assert outage_totals(Echo(1, 1, 1, 0), Echo(9, 4, 1, 0), 5).status == "unknown"   # more echoes than arrivals
+
+
+def test_direction_stops_at_another_epoch():
+    assert packet_direction(10, [Echo(11, 0, 2, 0)], epoch=1) == "unknown"
+    assert packet_direction(10, [Echo(11, 0, 1, 0)], epoch=1) == "up"

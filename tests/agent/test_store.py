@@ -172,3 +172,17 @@ def test_buffer_is_capped_when_sqlite_keeps_failing(tmp_path, monkeypatch):
         await s.close()
         return n
     assert run(main()) == 100
+
+
+def test_late_dir_adjusts_direction_column(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await s.add_samples([SampleRow(1000, "udp_stream", "reflector", sent=10, ok=8, lost=2, lost_up=1, lost_down=1)])
+        await s.flush()
+        await s.late_dir(1000, "udp_stream", "reflector", "down")
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    assert con.execute("select lost, lost_up, lost_down, late from samples_1s").fetchone() == (1, 1, 0, 1)
+    con.close()
