@@ -32,6 +32,9 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket):
+        if not socket.scope.get("state", {}).get("ws_allowed"):
+            await socket.close(code=1008)   # rejected before accept: the browser sees a failed handshake
+            return
         await socket.accept(subprotocol="whydrop")
         q = bus.subscribe()
 

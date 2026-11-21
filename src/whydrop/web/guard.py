@@ -88,13 +88,14 @@ class Guard:
                 await send(msg)
             return await self.app(scope, receive, secured)
         if scope["type"] == "websocket":
-            h = _headers(scope)
-            scheme = "https" if scope.get("scheme") == "wss" else "http"
-            same = h.get(b"origin", b"").decode("latin-1") == f"{scheme}://{h.get(b'host', b'').decode('latin-1')}"
-            protos = scope.get("subprotocols", [])
-            tok = next((p for p in protos if p != "whydrop"), None)
-            if not same or "whydrop" not in protos or not self._ok(tok):
-                await receive()                                 # websocket.connect
-                await send({"type": "websocket.close", "code": 1008})
-                return
+            scope.setdefault("state", {})["ws_allowed"] = self.ws_allowed(scope)  # the endpoint closes if not
         await self.app(scope, receive, send)
+
+    def ws_allowed(self, scope) -> bool:
+        """Same scheme, host and port as the page, the whydrop subprotocol, and the token when one is set."""
+        h = _headers(scope)
+        scheme = "https" if scope.get("scheme") == "wss" else "http"
+        same = h.get(b"origin", b"").decode("latin-1") == f"{scheme}://{h.get(b'host', b'').decode('latin-1')}"
+        protos = scope.get("subprotocols", [])
+        tok = next((p for p in protos if p != "whydrop"), None)
+        return same and "whydrop" in protos and self._ok(tok)
