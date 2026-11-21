@@ -96,6 +96,7 @@ class Agent:
         self._web = None
         self._web_task = None
         self._nat_task: asyncio.Task | None = None
+        self.notifier = None
         self._nat_progress: dict | None = None
         self._gw_seen = False
         self.fb = FrameBuilder()
@@ -519,6 +520,18 @@ class Agent:
                 "INSERT OR IGNORE INTO udp_seq_ring (agent_id, ts_ms, seq, echoed, dir) VALUES (?, ?, ?, ?, ?)",
                 [(self.store.agent_id, t, q, int(e), d) for t, q, e, d in rows if q >= 0]), "packet strip")
 
+    # ---------- alerts ----------
+    async def start_notify(self) -> None:
+        from whydrop.agent.notify import Notifier
+        self.notifier = Notifier(dict(self.cfg.notify), self.now)
+        if not (self.notifier.enabled or self.notifier.kuma):
+            return
+        self.notifier.queue = json.loads(await self.store.meta_get("notify_queue") or "[]")  # survives restarts
+        if self.notifier.enabled:
+            self.spawn(self.notifier.run(self.bus, self.stop), "alerts")
+        if self.notifier.kuma:
+            self.sched.every("kuma", 60.0, self.notifier.kuma_push, phase_s=5)
+
     # ---------- dashboard ----------
     def _publish_recorded(self, rows, events) -> None:
         from dataclasses import asdict
@@ -671,6 +684,7 @@ class Agent:
             self.start_selfcheck(after_failed=True)
         self.schedule()
         self.spawn(self.start_web(), "dashboard start")
+        await self.start_notify()
         if self.precision:
             await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now,
@@ -704,6 +718,8 @@ class Agent:
             steps.append(lambda: self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels)))
         if self.agg:
             steps.append(lambda: self.agg.flush_ready(force=True))
+        if self.notifier is not None and (self.notifier.queue or self.notifier.enabled):
+            steps.append(lambda: self.store.meta_set("notify_queue", json.dumps(self.notifier.queue)))
         if self.run_id is not None:
             steps.append(self.save_analysis_meta)
             steps.append(lambda: self.store.run_stop(self.run_id, self.now()))

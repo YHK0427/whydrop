@@ -422,3 +422,27 @@ def test_dashboard_served_while_recording(fakes, monkeypatch):
         await asyncio.wait_for(task, 10)
     asyncio.run(go())
     assert got["health"] == b'{"ok":true}' and got["status"]["mode"] == "basic"
+
+
+
+def test_alert_sent_for_finalized_drop_through_the_agent(fakes, monkeypatch):
+    from whydrop.agent import notify
+    sent = []
+    monkeypatch.setattr(notify, "_post", lambda url, body, headers: sent.append(json.loads(body)))
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, notify={"webhook_url": "http://127.0.0.1:9/hook", "format": "json"})
+
+    async def go():
+        stop = asyncio.Event()
+        agent = runmod.Agent(cfg, stop)
+        task = asyncio.create_task(agent.run())
+        await asyncio.sleep(1.5)
+        agent.bus.publish("incident", {"op": "finalized", "row": {
+            "id": 1, "start_ms": 0, "end_ms": 5000, "primary_cause": "R2", "cause_final": "R2",
+            "tags_json": json.dumps({"segments": ["line"]}), "evidence_json": json.dumps({"label": "Line drop (likely)"})}})
+        await asyncio.sleep(0.5)
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    asyncio.run(go())
+    assert [m["drop"]["cause"] for m in sent] == ["R2"]
