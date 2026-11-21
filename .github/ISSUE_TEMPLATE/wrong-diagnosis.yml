@@ -1,0 +1,24 @@
+name: Wrong diagnosis / 잘못된 진단
+description: whydrop explained a drop badly, or missed one / 끊김을 잘못 설명했거나 놓쳤어요
+labels: [diagnosis]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Attach the drop's bug report (Drops → the drop → Bug report). It uses the public view, but read it before attaching.
+        끊김의 버그 리포트(끊김 기록 → 그 끊김 → 버그 리포트)를 첨부해 주세요. 공개 보기를 쓰지만, 첨부 전에 한 번 읽어 보세요.
+  - type: textarea
+    id: what
+    attributes:
+      label: What whydrop said / whydrop의 판정
+    validations: {required: true}
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened, and how you know / 실제로 일어난 일과 그렇게 아는 이유
+    validations: {required: true}
+  - type: input
+    id: setup
+    attributes:
+      label: Setup / 환경
+      placeholder: "Linux Docker, Wi-Fi, basic mode, v0.1.0"
