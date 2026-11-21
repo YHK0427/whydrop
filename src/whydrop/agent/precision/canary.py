@@ -218,3 +218,66 @@ class HotCanary(_Canary):
             await asyncio.gather(*tasks, stopper, return_exceptions=True)
             if st["stall_at"] is not None:
                 self.emit("stall", phase="end", duration_s=round(self.mono() - st["stall_at"], 2), reconnected=True)
+
+
+class IdleCanary(_Canary):
+    """A connection that stays silent for `interval_s`; the reflector pings first (an agent-first send would let a
+    NAT that forgot the connection quietly learn it again). No ping by schedule + grace → `idle_state_lost`."""
+    role = Role.IDLE
+
+    def __init__(self, reflector, secret, on_event, *, interval_s: int, expect_s: float | None = None,
+                 grace_s: float = 5.0, **kw):
+        super().__init__(reflector, secret, on_event, param_s=interval_s, **kw)
+        self.interval_s = interval_s
+        self.expect_s = expect_s if expect_s is not None else float(interval_s)
+        self.grace_s = grace_s
+        self.pings = 0
+        self._suspended_at: float | None = None
+
+    def notify_suspend(self) -> None:
+        """The host slept; a missing ping during that time says nothing about the NAT."""
+        self._suspended_at = self.mono()
+
+    async def _session(self, reader, writer, stop) -> str:
+        started = self.mono()
+        due = started + self.expect_s
+
+        async def receiver():
+            nonlocal due
+            while True:
+                f = decode_frame(await reader.readexactly(FRAME_LEN))
+                if f.type == FrameType.IDLE_PING:
+                    self.pings += 1
+                    writer.write(encode_frame(Frame(FrameType.IDLE_PONG, 0, f.seq, f.t_send_ns)))
+                    await writer.drain()
+                    due = self.mono() + self.expect_s
+
+        async def watchdog():
+            while True:
+                await asyncio.sleep(min(0.1, self.grace_s / 3))
+                if self.mono() > due + self.grace_s:
+                    window_start = due - self.expect_s
+                    if self._suspended_at is not None and self._suspended_at >= window_start:
+                        return "suspended"  # reconnect quietly
+                    self.emit("idle_state_lost", interval_s=self.interval_s,
+                              waited_s=round(self.mono() - window_start, 1))
+                    return "idle_lost"
+
+        tasks = [asyncio.create_task(receiver()), asyncio.create_task(watchdog())]
+        stopper = asyncio.create_task(stop.wait())
+        try:
+            done, _ = await asyncio.wait({*tasks, stopper}, return_when=asyncio.FIRST_COMPLETED)
+            finished = done.pop()
+            if finished is stopper:
+                return "stopped"
+            exc = finished.exception()
+            if exc is not None:
+                kind = classify_conn_error(exc)
+                if kind in ("rst", "kernel_timeout"):
+                    self.emit(kind, canary="idle")
+                return kind
+            return finished.result()
+        finally:
+            for t in (*tasks, stopper):
+                t.cancel()
+            await asyncio.gather(*tasks, stopper, return_exceptions=True)
