@@ -180,6 +180,7 @@ class Settler:
         for key, (due, inc, prov) in list(self._due.items()):
             if due <= frame.t_ms:
                 del self._due[key]
+                inc.final = True
                 final = classify(inc, frames, cond, self.ctx)
                 out.append(Final(inc, final, prov, (final.rule, final.label) != (prov.rule, prov.label)))
         return out

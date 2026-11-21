@@ -51,3 +51,14 @@ def test_previous_run_leftovers_closed_with_their_cause(tmp_path):
     rows, cond = asyncio.run(go())
     assert rows[0][:2] == (50_000, "R1a") and "agent_restarted" in rows[0][2]   # ends at the last heartbeat, not 9 000 s
     assert rows[1][1] == "R2" and cond == [(50_000,)]
+
+
+def test_a_line_drop_after_the_settle_does_not_reopen_a_final_incident():
+    """Found replaying real data: a line down 80-120 s after a router recovery merged into the router incident after
+    its cause was already final, and the same incident was finalized twice. Final means frozen: it starts a new one."""
+    s = Scenario.default(400).fail(30, 40, probes={"gateway"}).internet_down(30, 40) \
+        .fail(30, 40, pairs={"dns_router:192.0.2.1:53/udp"}).internet_down(140, 150)
+    eng = Engine(s.ctx())
+    finals = [c.obj for f in s.frames() for c in eng.step(f) if c.type == "final"]
+    keys = [f.incident.key for f in finals]
+    assert len(keys) == len(set(keys)) == 2, [(f.incident.start_ms, f.incident.end_ms, f.cause.rule) for f in finals]

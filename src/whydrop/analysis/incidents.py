@@ -29,6 +29,7 @@ class Incident:
     open_segments: set = field(default_factory=set)
     downs: list = field(default_factory=list)           # SegmentChange downs, in order
     key: int = field(default_factory=lambda: next(_ids))
+    final: bool = False                                 # its cause is final: frozen, never merged into again
 
 
 @dataclass
@@ -150,7 +151,7 @@ class Incidents:
     def _down(self, c) -> list[IncidentChange]:
         out = []
         inc = self.current
-        if inc is None and self.last is not None and self.last.point is None:
+        if inc is None and self.last is not None and self.last.point is None and not self.last.final:
             since_end = c.t_ms - self.last.end_ms
             after_local = c.segment == "line" and any(c.t_ms - u <= K.MERGE_AFTER_LOCAL_S * 1000
                                                        for s, u in self._local_up.items() if s in self.last.segments)

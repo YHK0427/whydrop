@@ -39,7 +39,8 @@ def test_link_flap_wired():
 def test_lan_two_misses():
     _, ch = run(Scenario.default(30).fail(10, 11, probes={"gateway"}))
     assert downs(ch, "lan") == []
-    _, ch = run(Scenario.default(30).fail(10, 14, probes={"gateway"}).internet_down(10, 14))
+    dead_router = Scenario.default(30).fail(10, 14, probes={"gateway"}).internet_down(10, 14)         .fail(10, 14, pairs={"dns_router:192.0.2.1:53/udp"})          # a dead router doesn't answer DNS either
+    _, ch = run(dead_router)
     assert downs(ch, "lan") == [(10, "down"), (14, "up")]
 
 
@@ -47,6 +48,15 @@ def test_gateway_timeouts_while_the_internet_answers_are_not_a_router_drop():
     """Measured on a Wi-Fi home server: the gateway check timed out twice while line probes still answered
     through the router (600 ms RTT) — a latency spike, not a router outage."""
     _, ch = run(Scenario.default(30).fail(10, 14, probes={"gateway"}))
+    assert downs(ch, "lan") == []
+
+
+def test_late_replies_through_the_router_are_not_a_router_drop():
+    """Measured: for 7 s everything came back after its timeout (Wi-Fi queueing, 0.5-1.2 s) and the gateway check,
+    which doesn't record late replies, counted as lost. A late reply still crossed the router."""
+    s = Scenario.default(30).fail(10, 17, probes={"gateway"}).fail(10, 17, probes={"line_hb", "stun", "dns", "tcp_connect"},
+                                                                     kind="late")
+    _, ch = run(s)
     assert downs(ch, "lan") == []
 
 
