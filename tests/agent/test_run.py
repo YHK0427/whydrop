@@ -395,3 +395,30 @@ def test_packet_strip_saved_around_incident(fakes, tmp_path):
         await agent.store.close()
     asyncio.run(go())
     assert db(cfg, "select seq, echoed, dir from udp_seq_ring order by seq") == [(7, 1, "ok"), (8, 0, "up")]
+
+
+
+def test_dashboard_served_while_recording(fakes, monkeypatch):
+    import socket
+    import urllib.request
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, web=replace(cfg.web, bind=f"127.0.0.1:{port}"))
+    got = {}
+
+    async def go():
+        stop = asyncio.Event()
+        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        await asyncio.sleep(2.0)
+        got["health"] = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3).read())
+        got["status"] = json.loads(await asyncio.to_thread(
+            lambda: urllib.request.urlopen(f"http://127.0.0.1:{port}/api/status", timeout=3).read()))
+        stop.set()
+        await asyncio.wait_for(task, 10)
+    asyncio.run(go())
+    assert got["health"] == b'{"ok":true}' and got["status"]["mode"] == "basic"

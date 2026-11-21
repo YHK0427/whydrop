@@ -93,6 +93,9 @@ class Agent:
         self._canaries: list[asyncio.Task] = []
         self._providers: dict[str, str] = {}
         self._nat_tcp_lower: int | None = None
+        self.bus = None
+        self._web = None
+        self._web_task = None
         self._gw_seen = False
         self.fb = FrameBuilder()
         self.engine: Engine | None = None
@@ -512,6 +515,44 @@ class Agent:
                 "INSERT OR IGNORE INTO udp_seq_ring (agent_id, ts_ms, seq, echoed, dir) VALUES (?, ?, ?, ?, ?)",
                 [(self.store.agent_id, t, q, int(e), d) for t, q, e, d in rows if q >= 0]), "packet strip")
 
+    # ---------- dashboard ----------
+    def status(self) -> dict:
+        from whydrop.agent import traffic
+        return {"version": __version__, "mode": self.tags.get("mode"), "agent": self.cfg.agent_name,
+                "reflector": None if not self.precision else {"hot": self.hot.state if self.hot else None,
+                                                              "stream_ok": bool(self.stream and self.stream.last_echo_ms)},
+                "bytes": dict(traffic.BYTES), "baseline": self.engine.cond.baseline_state(self.now()) if self.engine else "none",
+                "now_ms": self.now()}
+
+    async def start_web(self) -> None:
+        try:
+            import contextlib
+
+            import uvicorn
+
+            from whydrop.web.app import create_app
+            from whydrop.web.bus import Bus
+            from whydrop.web.guard import LOOPBACK, allowed_hosts, resolve_token
+        except ImportError:
+            log.info("dashboard off: install whydrop[web] to get it")
+            return
+        host, _, port = self.cfg.web.bind.rpartition(":")
+        host = host.strip("[]") or "127.0.0.1"
+        token = resolve_token(host, os.environ, self.cfg.db_path.parent)
+        self.bus = Bus()
+        app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
+                         public_default=self.cfg.web.public_view_default, status=self.status)
+        server = uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning", access_log=False,
+                                               lifespan="off", ws="websockets-sansio"))
+        server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
+        self._web = server
+        self._web_task = self.spawn(server.serve(), "dashboard")
+        if host in LOOPBACK:
+            log.info("dashboard: http://%s:%s/", host, port)
+        else:  # the Jupyter way: the one place the token is shown
+            from whydrop.agent.probes import host_net
+            log.warning("dashboard: http://%s:%s/?token=%s", host_net.source_address() or host, port, token)
+
     # ---------- main ----------
     async def wait_route(self) -> bool:
         for _ in range(ROUTE_WAIT_S):
@@ -590,6 +631,7 @@ class Agent:
         elif await self.selfcheck() != "ok":
             self.start_selfcheck(after_failed=True)
         self.schedule()
+        await self.start_web()
         if self.precision:
             await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now,
@@ -604,6 +646,10 @@ class Agent:
         await asyncio.gather(self.sched.run(self.stop), watchdog.run(self.stop))
 
     async def _shutdown(self) -> None:
+        if self._web is not None:
+            self._web.should_exit = True
+            if self._web_task is not None:
+                await asyncio.gather(self._web_task, return_exceptions=True)
         for t in self._canaries:  # first, so their last events (stall end) land before the store closes
             t.cancel()
         await asyncio.gather(*self._canaries, return_exceptions=True)
