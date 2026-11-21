@@ -83,9 +83,11 @@ def _nat_test(args: argparse.Namespace) -> int:
     if not cfg.reflector:
         print("whydrop: nat-test needs a reflector (WHYDROP_REFLECTOR or reflector = in the config)", file=sys.stderr)
         return 2
-    udp = () if args.tcp_only else tuple(d for d in natprobe.UDP_DELAYS if d <= args.max_delay)
+    udp = () if args.tcp_only else natprobe.UDP_DELAYS
     tcp_all = natprobe.TCP_DELAYS + ((7500,) if args.enable_7500 else ())
-    tcp = () if args.udp_only else tuple(d for d in tcp_all if d <= args.max_delay)
+    max_delay = args.max_delay if args.max_delay is not None else (7500 if args.enable_7500 else 3600)
+    udp = tuple(d for d in udp if d <= max_delay)
+    tcp = () if args.udp_only else tuple(d for d in tcp_all if d <= max_delay)
     longest = max(udp + tcp, default=0)
     print(f"whydrop nat-test: {len(udp)} UDP + {len(tcp)} TCP delays in parallel, about {longest // 60 + 1} min")
 
@@ -101,6 +103,11 @@ def _nat_test(args: argparse.Namespace) -> int:
         return 130
     print()
     print(natprobe.format_report(rep))
+    refused = {r.detail.get("reason") for r in rep.tcp} & {"auth_fail", "version", "busy"}
+    if refused:
+        print(f"whydrop: the reflector refused the TCP test ({', '.join(sorted(refused))}); "
+              "check WHYDROP_SECRET and the reflector version", file=sys.stderr)
+        return 1
     if cfg.db_path.exists():  # an agent is recording here: keep the result next to its data
         from whydrop.agent.store import Store
 
@@ -131,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     only = n.add_mutually_exclusive_group()
     only.add_argument("--udp-only", action="store_true")
     only.add_argument("--tcp-only", action="store_true")
-    n.add_argument("--max-delay", type=int, default=3600, help="skip delays longer than this (seconds)")
+    n.add_argument("--max-delay", type=int, default=None, help="skip delays longer than this (seconds)")
     n.add_argument("--enable-7500", action="store_true", help="also test 7500 s TCP (reflector must allow it)")
     try:
         args = parser.parse_args(argv)

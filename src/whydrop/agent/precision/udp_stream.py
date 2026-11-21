@@ -176,6 +176,10 @@ class UdpStream:
                 log.warning("udp_stream: cannot reach the reflector (%s)", classify_oserror(e).get("error"))
             await asyncio.sleep(1)
             return False
+        except Exception:
+            log.exception("udp_stream: reconnect failed")
+            await asyncio.sleep(1)
+            return False
 
     async def start(self) -> None:
         await self._connect()

@@ -122,6 +122,10 @@ class Store:
     async def add_events(self, events: list[Event]) -> None:
         self._events.extend(events)
 
+    def add_events_nowait(self, events: list[Event]) -> None:
+        """For sync callbacks (canary/stream events): buffered like add_events, flushed with the next commit."""
+        self._events.extend(events)
+
     def _flush_sync(self, samples: list[SampleRow], events: list[Event]) -> None:
         with self._con:
             self._con.executemany(_UPSERT, [(self.agent_id, *astuple(r)) for r in samples])

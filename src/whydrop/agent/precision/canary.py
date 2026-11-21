@@ -1,6 +1,7 @@
 """TCP canaries to the reflector (spec §5.3): the hot one heartbeats every second and shows what TCP does during
 a drop (stall, retransmissions, RST); the idle one shows whether a NAT forgets a silent connection."""
 import asyncio
+import logging
 import os
 import random
 import socket
@@ -15,6 +16,8 @@ from whydrop.proto.wt import (
     FRAME_LEN, Frame, FrameType, Hello, Role, WtError, WtType,
     decode_frame, decode_hello_ok, decode_nonce, encode_frame, encode_hello,
 )
+
+log = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 1.5
 HELLO_TIMEOUT_S = 5.0
@@ -58,6 +61,7 @@ class _Canary:
         self._refusal_reported = False
 
     def emit(self, kind: str, **detail) -> None:
+        detail.setdefault("canary", self.role.name.lower())
         self.on_event(Event(kind, self.tb.now_ms(), "reflector", detail))
 
     async def _pause(self, seconds: float, stop: asyncio.Event) -> None:
@@ -131,6 +135,9 @@ class _Canary:
             if kind in ("rst", "kernel_timeout"):
                 self.emit(kind)
             return kind
+        except Exception:
+            log.exception("%s canary: unexpected error", self.role.name.lower())
+            return "error"
         finally:
             if not stop.is_set() and self.state in ("ok", "stall"):
                 self.state = "down"
@@ -154,7 +161,7 @@ class HotCanary(_Canary):
         u = self.udp_rtt() if self.udp_rtt else None
         if u is None or len(self._rtts) < 10:
             return
-        flag = self.rtt_ms < 0.5 * u
+        flag = self.rtt_ms < (0.7 if self.middlebox else 0.5) * u  # on below 0.5x, off above 0.7x
         if flag != self.middlebox:
             self.middlebox = flag
             self.emit("middlebox", flag=flag, canary_ms=round(self.rtt_ms, 2), udp_ms=round(u, 2))
@@ -205,10 +212,12 @@ class HotCanary(_Canary):
                     return "stall"
 
         async def tcp_info():
-            first = True
-            while True:  # a baseline 1 s after connecting, then every 10 s (1 s during a stall)
-                await asyncio.sleep(1.0 if first or st["stall_at"] is not None else self.tcp_info_s)
-                first = False
+            next_at = self.mono() + 1.0  # a baseline 1 s after connecting
+            while True:  # then every 10 s, every 1 s during a stall
+                await asyncio.sleep(min(1.0, self.tcp_info_s))
+                if st["stall_at"] is None and self.mono() < next_at:
+                    continue
+                next_at = self.mono() + self.tcp_info_s
                 info = read_tcp_info(sock) if sock is not None else None
                 if info:
                     self.emit("tcp_info", **info)
@@ -241,11 +250,12 @@ class IdleCanary(_Canary):
     role = Role.IDLE
 
     def __init__(self, reflector, secret, on_event, *, interval_s: int, expect_s: float | None = None,
-                 grace_s: float = 5.0, **kw):
+                 grace_s: float = 5.0, verdict_delay_s: float = 1.5, **kw):
         super().__init__(reflector, secret, on_event, param_s=interval_s, **kw)
         self.interval_s = interval_s
         self.expect_s = expect_s if expect_s is not None else float(interval_s)
         self.grace_s = grace_s
+        self.verdict_delay_s = verdict_delay_s
         self.pings = 0
         self._suspended_at: float | None = None
 
@@ -272,6 +282,7 @@ class IdleCanary(_Canary):
                 await asyncio.sleep(min(0.1, self.grace_s / 3))
                 if self.mono() > due + self.grace_s:
                     window_start = due - self.expect_s
+                    await asyncio.sleep(self.verdict_delay_s)  # the suspend event arrives on the next tick
                     if self._suspended_at is not None and self._suspended_at >= window_start:
                         return "suspended"  # reconnect quietly
                     self.emit("idle_state_lost", interval_s=self.interval_s,

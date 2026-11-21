@@ -85,6 +85,7 @@ class Agent:
         self._line_ok_ms: int | None = None
         self._pfail_since: int | None = None
         self._standing: set[str] = set()
+        self._canaries: list[asyncio.Task] = []
 
     # ---------- helpers ----------
     def now(self) -> int:
@@ -395,7 +396,7 @@ class Agent:
 
     # ---------- precision mode ----------
     def pevent(self, e: Event) -> None:
-        self.spawn(self.store.add_events([e]), "precision event")
+        self.store.add_events_nowait([e])  # sync: works during shutdown too
 
     async def start_precision(self) -> None:
         secret = load_secret(os.environ, required=True)
@@ -407,8 +408,8 @@ class Agent:
                              udp_rtt=self.stream.rtt_median_ms)
         self.idle = IdleCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
                                interval_s=self.cfg.canary_idle_interval_s)
-        self.spawn(self.hot.run(self.stop), "hot canary")
-        self.spawn(self.idle.run(self.stop), "idle canary")
+        self._canaries = [self.spawn(self.hot.run(self.stop), "hot canary"),
+                          self.spawn(self.idle.run(self.stop), "idle canary")]
         self.sched.every("precision", PRECISION_EVERY_S, self.job_precision, phase_s=PRECISION_EVERY_S * 0.9)
 
     async def job_precision(self):
@@ -416,7 +417,7 @@ class Agent:
         now = self.now()
         line_ok = self._line_ok_ms is not None and now - self._line_ok_ms < LINE_FRESH_MS
         stream_ok = self.stream.last_echo_ms is not None and now - self.stream.last_echo_ms < ECHO_FRESH_MS
-        failing = line_ok and not stream_ok and self.hot.state != "ok"
+        failing = line_ok and not stream_ok and self.hot.state not in ("ok", "auth_failed")  # auth: secret_mismatch
         self._pfail_since = (self._pfail_since or now) if failing else None
         await self.standing("precision_degraded", failing and now - self._pfail_since >= DEGRADED_AFTER_S * 1000)
         await self.standing("secret_mismatch", self.hot.state == "auth_failed")
@@ -523,12 +524,17 @@ class Agent:
         await asyncio.gather(self.sched.run(self.stop), watchdog.run(self.stop))
 
     async def _shutdown(self) -> None:
+        for t in self._canaries:  # first, so their last events (stall end) land before the store closes
+            t.cancel()
+        await asyncio.gather(*self._canaries, return_exceptions=True)
         for t in list(self._bg):
             t.cancel()
         await asyncio.gather(*self._bg, return_exceptions=True)
         steps = []
         if self.stream:
             steps.append(lambda: self.stream.stop(flush=True))
+        for kind in list(self._standing):
+            steps.append(lambda kind=kind: self.standing(kind, False))
         if self.wifi_tracker:
             steps.append(lambda: self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels)))
         if self.agg:

@@ -46,7 +46,7 @@ def keepalive(lower: int | None, upper: int | None) -> int | None:
     """Only for a closed range: 80% of the longest delay that survived, rounded down to 5 s."""
     if lower is None or upper is None:
         return None
-    return max(5, int(lower * 0.8) // 5 * 5)
+    return max(5, lower * 4 // 5 // 5 * 5)
 
 
 async def _race(coro, seconds: float, sleep):
@@ -126,7 +126,8 @@ async def tcp_delay(addr: tuple[str, int], secret: bytes, delay: int, *, sleep=a
         await writer.drain()
         head = await asyncio.wait_for(reader.readexactly(4), 5)
         if head[3] != wt.WtType.HELLO_OK:
-            return DelayResult("tcp", delay, None, {"reason": wt.WtType(head[3]).name.lower()})
+            known = {t.value: t.name.lower() for t in wt.WtType}
+            return DelayResult("tcp", delay, None, {"reason": known.get(head[3], f"type {head[3]}")})
         wt.decode_hello_ok(head + await asyncio.wait_for(reader.readexactly(12), 5), secret, anonce)
 
         async def probe():
@@ -144,13 +145,18 @@ async def tcp_delay(addr: tuple[str, int], secret: bytes, delay: int, *, sleep=a
 async def nat_test(reflector: tuple[str, int], secret: bytes, *, udp_delays=UDP_DELAYS, tcp_delays=TCP_DELAYS,
                    sleep=asyncio.sleep, on_progress=None) -> NatReport:
     """All delays run at once (each with its own socket/session), so a full run takes about the longest delay."""
-    async def tracked(coro):
-        r = await coro
+    async def tracked(proto, delay, coro):
+        try:
+            r = await coro
+        except Exception as e:  # one broken delay must not take the whole run down
+            r = DelayResult(proto, delay, None, {"reason": type(e).__name__})
         if on_progress:
             on_progress(r)
         return r
-    udp = await asyncio.gather(*(tracked(udp_delay(reflector, secret, d, sleep=sleep)) for d in udp_delays))
-    tcp = await asyncio.gather(*(tracked(tcp_delay(reflector, secret, d, sleep=sleep)) for d in tcp_delays))
+    jobs = [tracked("udp", d, udp_delay(reflector, secret, d, sleep=sleep)) for d in udp_delays] + \
+           [tracked("tcp", d, tcp_delay(reflector, secret, d, sleep=sleep)) for d in tcp_delays]
+    done = await asyncio.gather(*jobs)
+    udp, tcp = done[:len(udp_delays)], done[len(udp_delays):]
     ur, tr = bracket(list(udp)), bracket(list(tcp))
     return NatReport(list(udp), list(tcp), ur, tr, {"udp": keepalive(*ur), "tcp": keepalive(*tr)})
 

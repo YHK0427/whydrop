@@ -42,7 +42,7 @@ class BlackholeAfterHandshake:
 def run_canary(port, seconds, events, **kw):
     async def main():
         c = IdleCanary(("127.0.0.1", port), S, events.append, session_id=9, interval_s=30, expect_s=0.1,
-                       grace_s=0.3, **kw)
+                       grace_s=0.3, verdict_delay_s=0, **kw)
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
         await asyncio.sleep(seconds)
@@ -93,6 +93,27 @@ def test_idle_lost_suppressed_during_suspend():
         for _ in range(10):
             await asyncio.sleep(0.1)
             c.notify_suspend()  # the host itself was asleep during the wait
+        stop.set()
+        await task
+        srv.close()
+    asyncio.run(main())
+    assert "idle_state_lost" not in [e.kind for e in events]
+
+
+def test_suspend_reported_just_after_deadline_still_suppresses():
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        bh = BlackholeAfterHandshake()
+        pport = await bh.start(port)
+        c = IdleCanary(("127.0.0.1", pport), S, events.append, session_id=9, interval_s=30, expect_s=0.1, grace_s=0.2,
+                       verdict_delay_s=0.5)
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(0.45)          # past due + grace, inside the verdict delay
+        c.notify_suspend()                 # job_tick reports the sleep a moment late
+        await asyncio.sleep(0.3)
         stop.set()
         await task
         srv.close()

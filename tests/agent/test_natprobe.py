@@ -152,3 +152,22 @@ def test_cli_report_and_store(tmp_path):
         await s.close()
         return rows
     assert asyncio.run(main()) == [("udp", 30, 1), ("udp", 60, 0)]
+
+
+def test_udp_and_tcp_run_together_and_errors_are_inconclusive(monkeypatch):
+    from whydrop.agent.precision import natprobe
+    started = []
+
+    async def udp(addr, secret, d, *, sleep):
+        started.append(("udp", asyncio.get_running_loop().time()))
+        raise OSError("boom")
+
+    async def tcp(addr, secret, d, *, sleep):
+        started.append(("tcp", asyncio.get_running_loop().time()))
+        await asyncio.sleep(0.2)
+        return DelayResult("tcp", d, True)
+    monkeypatch.setattr(natprobe, "udp_delay", udp)
+    monkeypatch.setattr(natprobe, "tcp_delay", tcp)
+    rep = asyncio.run(nat_test(("127.0.0.1", 1), S, udp_delays=(10,), tcp_delays=(60,)))
+    assert rep.udp[0].alive is None and rep.udp[0].detail["reason"] == "OSError" and rep.tcp[0].alive
+    assert abs(started[0][1] - started[1][1]) < 0.1  # TCP didn't wait for UDP
