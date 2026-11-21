@@ -2,6 +2,7 @@
 import asyncio
 import json
 import logging
+import os
 import secrets
 import sys
 
@@ -11,6 +12,7 @@ from whydrop.agent.clock import TimeBase, wait_time_sync
 from whydrop.agent.config import Config
 from whydrop.agent.events import Event
 from whydrop.agent.housekeeping import housekeep
+from whydrop.agent.precision import precision_enabled
 from whydrop.agent.probes import dns_probe, gateway, host_net, line_hb, link, tcp_connect, wifi
 from whydrop.agent.probes.stun_probe import StunWatcher
 from whydrop.agent.probes.targets import Targets, mask_pair, pair_id
@@ -67,6 +69,8 @@ class Agent:
         self.wifi_src = None
         self.link_tracker = None
         self.run_id: int | None = None
+        self.precision = False
+        self._gw_open = False  # the gateway answers only on an open port (costs more bytes, spec §10)
 
     # ---------- helpers ----------
     def now(self) -> int:
@@ -172,9 +176,16 @@ class Agent:
     # ---------- probe jobs ----------
     async def job_gateway(self):
         if self.env and self.env.gateway:
-            await self.record(await gateway.probe(self.env.gateway, self.cfg.gateway_port, self.now))
+            r = await gateway.probe(self.env.gateway, self.cfg.gateway_port, self.now)
+            if r.ok:
+                self._gw_open = r.detail.get("method") == "tcp" and not r.detail.get("rst")
+            await self.record(r)
 
     async def job_line_hb(self):
+        tick = self._rot.setdefault("line_hb_tick", 0)
+        self._rot["line_hb_tick"] += 1
+        if self.precision and self._gw_open and tick % 2:
+            return  # 0.5 Hz keeps precision mode under 20 kbps; udp_stream covers the line (spec §10)
         rot = self.targets.line_hb_rotation()
         if not rot:
             return
@@ -198,10 +209,14 @@ class Agent:
 
     async def job_dns(self):
         """Every pair once per dns interval, staggered: each 1 s tick serves the pairs in its slot."""
-        slots = max(1, int(self.cfg.intervals["dns"]))
+        base = max(1, int(self.cfg.intervals["dns"]))
         tick = self._rot["dns"]
         self._rot["dns"] += 1
-        mine = [p for i, p in enumerate(self.dns_now()) if i % slots == tick % slots]
+        mine = []
+        for i, p in enumerate(self.dns_now()):
+            every = 2 * base if self.precision and p[0] == "dns_public" else base  # public DNS at 10 s in precision
+            if (tick - i) % every == 0:
+                mine.append(p)
 
         async def one(cls, addr, prov):
             t0 = self.now()
@@ -425,6 +440,10 @@ class Agent:
         self.agg = Aggregator(self.store, self.now)
         self.findings = FindingsTracker(self.targets, self.now)
         self.wifi_tracker = wifi.WifiTracker(bytes.fromhex(salt), self.now, labels)
+        self.precision, why_not = precision_enabled(self.cfg, os.environ)
+        self.tags["mode"] = "precision" if self.precision else "basic"
+        if why_not and self.cfg.reflector:
+            log.warning("precision mode off: %s", why_not)
         self.run_id = await self.store.run_start(self.now(), __version__, self.tags)
         await self.vpn_finding()
         # one bounded pass inline; if it can't decide (e.g. started mid-outage), keep retrying in the background
@@ -436,7 +455,7 @@ class Agent:
         self.schedule()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now)
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
-        log.info("watching: mode=basic link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
+        log.info("watching: mode=" + self.tags["mode"] + " link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
                  _mask(self.env.gateway), ",".join(_mask(a) for a in self.env.isp_dns) or "unknown",
                  _excluded_text(self.targets.excluded))
         if on_ready:
