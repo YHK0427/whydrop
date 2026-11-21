@@ -93,3 +93,68 @@ def test_traffic_budget_basic():
     kbps = bps / 1000
     assert per_run["dns"] == 28 + 29 + 28 + 29 + 6 * 16  # query and a 6-answer reply, IP+UDP headers included
     assert 4.0 < kbps <= 8.0, f"basic mode {kbps:.2f} kbps"
+
+
+
+def measure_precision() -> dict[str, float]:
+    """Bytes per second of udp_stream and the hot canary, measured against the real reflector on loopback."""
+    from whydrop.agent.precision.canary import HotCanary
+    from whydrop.agent.precision.udp_stream import UdpStream
+    from whydrop.reflector.replay import Tombstones
+    from whydrop.reflector.tcp import TcpReflector, serve_tcp
+    from whydrop.reflector.udp import UdpReflector, serve_udp
+    S = b"s" * 32
+
+    class Sink:
+        async def add_samples(self, rows):
+            pass
+
+        async def late_dir(self, *a):
+            pass
+
+    async def main():
+        u = await serve_udp(UdpReflector(S, epoch=1, tombstones=Tombstones(None)), "127.0.0.1", 0)
+        t = await serve_tcp(TcpReflector(S, epoch=1), "127.0.0.1", u.port)
+        before = traffic.BYTES["udp_stream"]
+        st = UdpStream(("127.0.0.1", u.port), S, Sink(), pps=10)
+        await st.start()
+        await asyncio.sleep(2.0)
+        await st.stop()
+        stream_per_pkt = (traffic.BYTES["udp_stream"] - before) / st._seq
+        before = traffic.BYTES["canary"]
+        c = HotCanary(("127.0.0.1", u.port), S, lambda e: None, session_id=1, hb_s=0.1)
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(1.05)
+        stop.set()
+        await task
+        hb_round = (traffic.BYTES["canary"] - before) / max(1, len(c._rtts))  # an unanswered last HB only overcounts
+        await u.close()
+        t.close()
+        return {"stream_per_pkt": stream_per_pkt, "hb_round": hb_round}
+    return asyncio.run(main())
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("gateway_open", [False, True])
+def test_traffic_budget_precision(gateway_open):
+    per_run = measure()
+    p = measure_precision()
+    iv = load_config(None, {}).intervals
+    gateway = (2 * traffic.TCP_SYN + traffic.TCP_SEG + traffic.TCP_RST) if gateway_open else traffic.TCP_SYN + traffic.TCP_RST
+    hb_rate = 2 if gateway_open else 1  # run.py halves line_hb only when the gateway answers on an open port
+    pure_acks = 2 * traffic.TCP_SEG  # worst case: neither side piggybacks its ACK on the next frame
+    bps = 8 * (gateway / iv["gateway"]
+               + per_run["line_hb"] / (hb_rate * iv["line_hb"])
+               + 3 * per_run["dns"] / iv["dns"]                      # router + 2 ISP at the basic interval
+               + 5 * per_run["dns"] / max(iv["dns"], 10)             # 5 public pairs at 10 s
+               + per_run["dns_tcp"] / iv["dns_tcp"]
+               + per_run["stun"] / iv["stun"]
+               + per_run["tcp_connect"] / iv["tcp_connect"]
+               + 10 * p["stream_per_pkt"]                            # udp_stream at 10 pps, PROBE + ECHO
+               + p["hb_round"] + pure_acks)                          # hot canary: 1 HB + 1 HB_ACK per second
+    kbps = bps / 1000
+    assert p["stream_per_pkt"] == 2 * (28 + 44)
+    assert 15.0 < kbps <= 20.0, f"precision mode {kbps:.2f} kbps"

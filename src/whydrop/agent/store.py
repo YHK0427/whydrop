@@ -122,6 +122,10 @@ class Store:
     async def add_events(self, events: list[Event]) -> None:
         self._events.extend(events)
 
+    def add_events_nowait(self, events: list[Event]) -> None:
+        """For sync callbacks (canary/stream events): buffered like add_events, flushed with the next commit."""
+        self._events.extend(events)
+
     def _flush_sync(self, samples: list[SampleRow], events: list[Event]) -> None:
         with self._con:
             self._con.executemany(_UPSERT, [(self.agent_id, *astuple(r)) for r in samples])
@@ -159,6 +163,18 @@ class Store:
                                   "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=?",
                                   (self.agent_id, ts_ms, probe, pair))
         await self._db(upd)
+
+    async def late_dir(self, ts_ms: int, probe: str, pair: str, direction: str) -> None:
+        """A late reply for a send already counted as lost in `direction` (up | down | unknown)."""
+        col = {"up": "lost_up", "down": "lost_down"}.get(direction, "lost_dir_unknown")
+        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)), None)
+        if r is not None:
+            r.late += 1
+            r.lost = max(0, r.lost - 1)
+            setattr(r, col, max(0, getattr(r, col) - 1))
+            return
+        await self.execute(f"UPDATE samples_1s SET late = late + 1, lost = MAX(0, lost - 1), {col} = MAX(0, {col} - 1) "
+                           "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=?", (self.agent_id, ts_ms, probe, pair))
 
     async def insert(self, table: str, **cols) -> int:
         if table not in _INSERTABLE or not all(c.isidentifier() for c in cols):

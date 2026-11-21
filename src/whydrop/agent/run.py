@@ -1,7 +1,9 @@
-"""`whydrop agent` (basic mode): startup order, probe schedule, persistence (spec §5.1, §5.2, §5.6)."""
+"""`whydrop agent`: startup order, probe schedule, persistence (spec §5.1, §5.2, §5.6), and in precision mode
+the udp_stream and TCP canaries to the reflector (§5.3)."""
 import asyncio
 import json
 import logging
+import os
 import secrets
 import sys
 
@@ -11,6 +13,9 @@ from whydrop.agent.clock import TimeBase, wait_time_sync
 from whydrop.agent.config import Config
 from whydrop.agent.events import Event
 from whydrop.agent.housekeeping import housekeep
+from whydrop.agent.precision import precision_enabled, reflector_addr
+from whydrop.agent.precision.canary import HotCanary, IdleCanary
+from whydrop.agent.precision.udp_stream import UdpStream
 from whydrop.agent.probes import dns_probe, gateway, host_net, line_hb, link, tcp_connect, wifi
 from whydrop.agent.probes.stun_probe import StunWatcher
 from whydrop.agent.probes.targets import Targets, mask_pair, pair_id
@@ -19,6 +24,7 @@ from whydrop.agent.results import Aggregator, Result
 from whydrop.agent.scheduler import LagWatchdog, Scheduler
 from whydrop.agent.selfcheck import CheckPair, FindingsTracker, nat_mapping, run_selfcheck
 from whydrop.agent.store import Store
+from whydrop.proto.mac import load_secret
 
 log = logging.getLogger("whydrop.agent")
 
@@ -31,6 +37,10 @@ NETWATCH_EVERY_S = 5
 STORE_FLUSH_S = 5
 BACKOFF_S = (30, 60, 120, 300)
 DNS_CLASSES = ("dns_router", "dns_isp", "dns_public")
+PRECISION_EVERY_S = 5
+DEGRADED_AFTER_S = 30      # both precision paths failing this long, with the line fine → "precision degraded"
+LINE_FRESH_MS = 15_000
+ECHO_FRESH_MS = 10_000
 
 
 class VMRefused(RuntimeError):
@@ -67,6 +77,15 @@ class Agent:
         self.wifi_src = None
         self.link_tracker = None
         self.run_id: int | None = None
+        self.precision = False
+        self._gw_open = False  # the gateway answers only on an open port (costs more bytes, spec §10)
+        self.stream: UdpStream | None = None
+        self.hot: HotCanary | None = None
+        self.idle: IdleCanary | None = None
+        self._line_ok_ms: int | None = None
+        self._pfail_since: int | None = None
+        self._standing: set[str] = set()
+        self._canaries: list[asyncio.Task] = []
 
     # ---------- helpers ----------
     def now(self) -> int:
@@ -92,6 +111,8 @@ class Agent:
             if isinstance(x, Result):
                 self.agg.add(x)
                 self.findings.feed(x)
+                if x.ok and x.probe in ("line_hb", "tcp_connect", "stun"):  # basic external probes
+                    self._line_ok_ms = self.now()
             else:
                 events.append(x)
         if events:
@@ -113,7 +134,7 @@ class Agent:
             for addr, prov in t.dns_pairs(cls, include_excluded=True):
                 pairs.append(CheckPair(pair_id(cls, addr, 53, "udp"), prov, cls, addr, "udp",
                                        lambda a=addr, c=cls, p=prov: dns_probe.udp(a, c, p, now)))
-                if cls == "dns_public":
+                if cls in ("dns_public", "dns_isp"):  # every class job_dns_tcp probes is checked over TCP too
                     pairs.append(CheckPair(pair_id(cls, addr, 53, "tcp"), prov, cls, addr, "tcp",
                                            lambda a=addr, c=cls, p=prov: dns_probe.tcp(a, c, p, now)))
         for s in t.by_kind("stun"):
@@ -172,9 +193,15 @@ class Agent:
     # ---------- probe jobs ----------
     async def job_gateway(self):
         if self.env and self.env.gateway:
-            await self.record(await gateway.probe(self.env.gateway, self.cfg.gateway_port, self.now))
+            r = await gateway.probe(self.env.gateway, self.cfg.gateway_port, self.now)
+            self._gw_open = r.ok and r.detail.get("method") == "tcp" and not r.detail.get("rst")
+            await self.record(r)
 
     async def job_line_hb(self):
+        tick = self._rot.setdefault("line_hb_tick", 0)
+        self._rot["line_hb_tick"] += 1
+        if self.precision and self._gw_open and tick % 2:
+            return  # 0.5 Hz keeps precision mode under 20 kbps; udp_stream covers the line (spec §10)
         rot = self.targets.line_hb_rotation()
         if not rot:
             return
@@ -198,10 +225,14 @@ class Agent:
 
     async def job_dns(self):
         """Every pair once per dns interval, staggered: each 1 s tick serves the pairs in its slot."""
-        slots = max(1, int(self.cfg.intervals["dns"]))
+        base = max(1, int(self.cfg.intervals["dns"]))
         tick = self._rot["dns"]
         self._rot["dns"] += 1
-        mine = [p for i, p in enumerate(self.dns_now()) if i % slots == tick % slots]
+        mine = []
+        for i, p in enumerate(self.dns_now()):
+            every = max(base, 10) if self.precision and p[0] == "dns_public" else base  # public DNS ≥ 10 s in precision
+            if (tick - i) % every == 0:
+                mine.append(p)
 
         async def one(cls, addr, prov):
             t0 = self.now()
@@ -285,6 +316,10 @@ class Agent:
 
     async def job_tick(self):
         events = self.tb.check()
+        if self.idle and any(e.kind == "suspend" for e in events):
+            self.idle.notify_suspend()  # a ping missed while the host slept says nothing about the NAT
+            self.hot.notify_suspend()
+            self.stream.reopen()
         if events:
             await self.store.add_events(events)
 
@@ -348,6 +383,8 @@ class Agent:
         if new.egress_vpn != old.egress_vpn:
             await self.vpn_finding()
         self._stun_key = None
+        if self.stream:
+            self.stream.reopen()  # a connected UDP socket keeps the old source address
         log.info("network changed; re-running self-check")
         self.start_selfcheck()
 
@@ -360,6 +397,47 @@ class Agent:
     async def job_heartbeat(self):
         await self.store.run_heartbeat(self.run_id, self.now())
         await self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels))
+
+    # ---------- precision mode ----------
+    def pevent(self, e: Event) -> None:
+        self.store.add_events_nowait([e])  # sync: works during shutdown too
+
+    async def start_precision(self) -> None:
+        secret = load_secret(os.environ, required=True)
+        addr = reflector_addr(self.cfg)
+        self.stream = UdpStream(addr, secret, self.store, self.tb, pps=self.cfg.udp_stream_pps, on_event=self.pevent)
+        await self.stream.start()
+        sid = self.stream.session_id
+        self.hot = HotCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
+                             udp_rtt=self.stream.rtt_median_ms)
+        self.idle = IdleCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
+                               interval_s=self.cfg.canary_idle_interval_s)
+        self._canaries = [self.spawn(self.hot.run(self.stop), "hot canary"),
+                          self.spawn(self.idle.run(self.stop), "idle canary")]
+        self.sched.every("precision", PRECISION_EVERY_S, self.job_precision, phase_s=PRECISION_EVERY_S * 0.9)
+
+    async def job_precision(self):
+        """Standing findings about the reflector path (spec §6.2 reflector_path); never incidents."""
+        now = self.now()
+        line_ok = self._line_ok_ms is not None and now - self._line_ok_ms < LINE_FRESH_MS
+        stream_ok = self.stream.last_echo_ms is not None and now - self.stream.last_echo_ms < ECHO_FRESH_MS
+        failing = line_ok and not stream_ok and self.hot.state not in ("ok", "auth_failed")  # auth: secret_mismatch
+        self._pfail_since = (self._pfail_since or now) if failing else None
+        await self.standing("precision_degraded", failing and now - self._pfail_since >= DEGRADED_AFTER_S * 1000)
+        await self.standing("secret_mismatch", self.hot.state == "auth_failed")
+        await self.standing("tcp_middlebox", self.hot.middlebox)
+
+    async def standing(self, kind: str, on: bool) -> None:
+        if on == (kind in self._standing):
+            return
+        if on:
+            self._standing.add(kind)
+            log.warning("finding: %s", kind)
+            await self.store.insert("findings", kind=kind, start_ms=self.now(), detail_json="{}")
+        else:
+            self._standing.discard(kind)
+            await self.store.execute("UPDATE findings SET end_ms = ? WHERE agent_id = ? AND kind = ? AND end_ms IS NULL",
+                                     (self.now(), self.store.agent_id, kind))
 
     # ---------- main ----------
     async def wait_route(self) -> bool:
@@ -425,6 +503,10 @@ class Agent:
         self.agg = Aggregator(self.store, self.now)
         self.findings = FindingsTracker(self.targets, self.now)
         self.wifi_tracker = wifi.WifiTracker(bytes.fromhex(salt), self.now, labels)
+        self.precision, why_not = precision_enabled(self.cfg, os.environ)
+        self.tags["mode"] = "precision" if self.precision else "basic"
+        if why_not and self.cfg.reflector:
+            log.warning("precision mode off: %s", why_not)
         self.run_id = await self.store.run_start(self.now(), __version__, self.tags)
         await self.vpn_finding()
         # one bounded pass inline; if it can't decide (e.g. started mid-outage), keep retrying in the background
@@ -434,9 +516,11 @@ class Agent:
         elif await self.selfcheck() != "ok":
             self.start_selfcheck(after_failed=True)
         self.schedule()
+        if self.precision:
+            await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now)
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
-        log.info("watching: mode=basic link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
+        log.info("watching: mode=" + self.tags["mode"] + " link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
                  _mask(self.env.gateway), ",".join(_mask(a) for a in self.env.isp_dns) or "unknown",
                  _excluded_text(self.targets.excluded))
         if on_ready:
@@ -444,10 +528,17 @@ class Agent:
         await asyncio.gather(self.sched.run(self.stop), watchdog.run(self.stop))
 
     async def _shutdown(self) -> None:
+        for t in self._canaries:  # first, so their last events (stall end) land before the store closes
+            t.cancel()
+        await asyncio.gather(*self._canaries, return_exceptions=True)
         for t in list(self._bg):
             t.cancel()
         await asyncio.gather(*self._bg, return_exceptions=True)
         steps = []
+        if self.stream:
+            steps.append(lambda: self.stream.stop(flush=True))
+        for kind in list(self._standing):
+            steps.append(lambda kind=kind: self.standing(kind, False))
         if self.wifi_tracker:
             steps.append(lambda: self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels)))
         if self.agg:
