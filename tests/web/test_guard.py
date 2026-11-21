@@ -69,6 +69,7 @@ def test_ws_needs_token_and_same_origin():
     good = lambda: {"Origin": "http://testserver"}  # noqa: E731  (TestClient mutates the dict it gets)
     with c.websocket_connect("/ws", headers=good(), subprotocols=["whydrop", TOKEN]) as ws:
         assert ws.accepted_subprotocol == "whydrop"
+        ws.close()  # say goodbye first: TestClient's __exit__ otherwise races the app task on Linux/3.11
     for protos in (["whydrop", "wrong"], ["whydrop"], [TOKEN]):
         with pytest.raises(WebSocketDisconnect):
             with c.websocket_connect("/ws", headers=good(), subprotocols=protos):
