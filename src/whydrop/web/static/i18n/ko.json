@@ -155,5 +155,7 @@
   "ev.cause_classes": "DNS 종류",
   "ev.interval_s": "유휴 간격(초)",
   "net.availability.sub_one": "끊김 1번, {dur}",
-  "test.hint_remote": "잘 되는지 확인하고 싶다면, 이 버튼을 누른 뒤 공유기의 인터넷 선을 10초 동안 뽑아 보세요."
+  "test.hint_remote": "잘 되는지 확인하고 싶다면, 이 버튼을 누른 뒤 공유기의 인터넷 선을 10초 동안 뽑아 보세요.",
+  "static.banner": "정적 데모: {from}~{to}에 기록한 데이터이고 주소는 숨겼어요. 시각은 기록이 끝난 시점 기준이에요.",
+  "static.rec": "기록 종료"
 }

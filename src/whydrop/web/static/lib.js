@@ -6,6 +6,27 @@ export const params = new URLSearchParams(location.search);
 export let isPublic = params.get("public") === "1";
 export function setPublic(v) { isPublic = isPublic || !!v; }   // web.public_view_default on the server
 
+// ---------- static demo (whydrop export-static): data files instead of the API, nothing writes ----------
+export let STATIC = null;
+export async function detectStatic() {
+  try { const r = await fetch("static.json", { cache: "no-store" }); if (r.ok) STATIC = await r.json(); } catch { STATIC = null; }
+  if (STATIC) setPublic(true);
+  return STATIC;
+}
+const SPANS = [3600, 21600, 86400, 604800, 2592000, 7776000];
+export function staticKey(path) {   // mirrors static_export.key_for
+  const [p, q] = path.split("?");
+  const qs = new URLSearchParams(q || "");
+  let k = p.replace(/^\/api\//, "").replace(/\//g, "_");
+  if (qs.get("incident")) k += `_incident_${qs.get("incident")}`;
+  else if (qs.get("from")) {
+    const span = ((Number(qs.get("to")) || Date.now()) - Number(qs.get("from"))) / 1000;
+    k += "_" + SPANS.reduce((a, b) => (Math.abs(b - span) < Math.abs(a - span) ? b : a));
+  }
+  if (qs.get("kind")) k += `_${qs.get("kind")}`;
+  return `data/${k}.json`;
+}
+
 // ---------- token: moved from ?token= into sessionStorage, then stripped from the URL (spec §8) ----------
 (() => {
   const t = params.get("token");
@@ -51,6 +72,12 @@ export function t(key, vars = {}) {
 export class ApiError extends Error { constructor(path, code) { super(`${path} ${code}`); this.path = path; this.code = code; } }
 
 export async function api(path, opts = {}) {
+  if (STATIC) {
+    if (opts.method && opts.method !== "GET") throw new ApiError(path, 405);
+    const r = await fetch(staticKey(path));
+    if (!r.ok) throw new ApiError(path, r.status);
+    return r.json();
+  }
   const headers = { ...(opts.headers || {}) };
   if (token()) headers.Authorization = `Bearer ${token()}`;
   if (opts.method && opts.method !== "GET") headers["X-Whydrop"] = "1";

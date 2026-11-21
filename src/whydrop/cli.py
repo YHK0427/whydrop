@@ -191,6 +191,20 @@ def _annotate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_static(args: argparse.Namespace) -> int:
+    try:
+        from whydrop.web.static_export import export_static
+    except ImportError:
+        print("whydrop: export-static needs the web extra: pip install 'whydrop[web]'", file=sys.stderr)
+        return 2
+    if not args.db.exists():
+        print(f"whydrop: no such database: {args.db}", file=sys.stderr)
+        return 2
+    m = export_static(args.db, args.out, _iso_ms(args.from_), _iso_ms(args.to), {"mode": args.mode})
+    print(f"wrote {m['files']} data files to {args.out} (public view, read-only)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whydrop")
     parser.add_argument("--version", action="version", version=f"whydrop {__version__}")
@@ -221,6 +235,12 @@ def main(argv: list[str] | None = None) -> int:
     an.add_argument("--start", required=True, help="ISO time; add the offset (e.g. +09:00) inside containers")
     an.add_argument("--end", default=None, help="ISO time")
     an.add_argument("--note", default=None)
+    ex = sub.add_parser("export-static", help="write a read-only public demo of the dashboard (for GitHub Pages)")
+    ex.add_argument("db", type=Path)
+    ex.add_argument("--out", type=Path, default=Path("site"))
+    ex.add_argument("--from", dest="from_", default=None, help="ISO time (only shown as the recorded date range)")
+    ex.add_argument("--to", default=None, help="ISO time; data is shown relative to it")
+    ex.add_argument("--mode", choices=("basic", "precision"), default="basic")
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:  # argparse exits for --version/--help/errors; main returns the code instead
@@ -231,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         return _agent(args)
     if args.cmd == "nat-test":
         return _nat_test(args)
+    if args.cmd == "export-static":
+        return _export_static(args)
     if args.cmd == "replay":
         return _replay(args)
     if args.cmd == "annotate":

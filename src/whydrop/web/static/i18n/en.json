@@ -155,5 +155,7 @@
   "ev.cause_classes": "DNS classes",
   "ev.interval_s": "Idle interval (s)",
   "net.availability.sub_one": "1 drop, {dur}",
-  "test.hint_remote": "Want proof it works? Unplug the router's internet cable for 10 seconds after pressing this."
+  "test.hint_remote": "Want proof it works? Unplug the router's internet cable for 10 seconds after pressing this.",
+  "static.banner": "Static demo: recorded {from} to {to}, addresses hidden. Times are relative to the end of the recording.",
+  "static.rec": "Recording ended"
 }
