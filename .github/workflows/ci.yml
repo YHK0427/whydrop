@@ -27,6 +27,33 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -q -m ui tests/ui
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -q
+  dissector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tshark
+      - run: uv sync --locked --all-extras
+      - run: uv run pytest -q tests/integration/test_dissector.py -rs
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: docker build -t whydrop:ci .
+      - run: docker run --rm whydrop:ci --version
+      - run: docker run --rm --read-only --tmpfs /tmp --user 10001 whydrop:ci reflector --help
+      - run: docker compose config -q
   gitleaks:
     runs-on: ubuntu-latest
     steps:
