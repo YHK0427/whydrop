@@ -1,6 +1,9 @@
 """Every analysis threshold from spec §6 in one place; `whydrop replay --set NAME=VALUE` overrides them."""
 
-FINALIZE_LAG_MS = 4_000          # the engine runs this far behind: udp_stream finalizes at t + 3.5 s
+FINALIZE_LAG_MS = 14_000         # the engine runs this far behind: late replies arrive up to timeout + 10 s
+MAX_TIMEOUT_S = 3                # the longest probe timeout (dns_tcp, canary stall)
+MAX_BACKLOG_S = 600              # frames are never built further back than this (old or skewed timestamps)
+LAG_SPAN_CAP_S = 600             # an agent_lag whose end never arrived stops counting after this
 
 # probe timeouts (seconds) — a send is judged only once its timeout has passed
 TIMEOUT_S = {"line_hb": 1.0, "stun": 1.0, "dns": 2.0, "dns_tcp": 3.0, "tcp_connect": 1.5, "gateway": 1.5,

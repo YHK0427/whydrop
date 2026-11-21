@@ -122,6 +122,72 @@ def _nat_test(args: argparse.Namespace) -> int:
     return 0
 
 
+def _iso_ms(text: str | None) -> int | None:
+    from datetime import datetime
+    if text is None:
+        return None
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.astimezone()  # local time, like the dashboard shows
+    return int(dt.timestamp() * 1000)
+
+
+def _replay(args: argparse.Namespace) -> int:
+    import json
+    from datetime import datetime
+
+    from whydrop.analysis import constants
+    from whydrop.analysis.replay import replay, summary
+
+    if not args.db.exists():
+        print(f"whydrop: no such database: {args.db}", file=sys.stderr)
+        return 2
+    for item in args.set or []:
+        name, _, value = item.partition("=")
+        try:
+            constants.override(name, value)
+        except (KeyError, ValueError) as e:
+            print(f"whydrop: --set {item}: {e}", file=sys.stderr)
+            return 2
+    rows = summary(replay(args.db, _iso_ms(args.from_), _iso_ms(args.to)))
+    if args.json:
+        print(json.dumps(rows, indent=1))
+    else:
+        for r in rows:
+            start = datetime.fromtimestamp(r["start_ms"] / 1000).isoformat(timespec="seconds")
+            secs = (r["end_ms"] - r["start_ms"]) / 1000 if r["end_ms"] else 0
+            print(f"{start}  {secs:7.1f} s  {r['cause']:<4} {r['label']}")
+        print(f"{len(rows)} incident(s); replay is approximate (1 s aggregates and events)")
+    return 0
+
+
+def _annotate(args: argparse.Namespace) -> int:
+    from whydrop.agent.config import ConfigError, load_config
+    from whydrop.agent.store import Store
+
+    path = args.config or (Path("whydrop.toml") if Path("whydrop.toml").exists() else None)
+    try:
+        cfg = load_config(path, os.environ)
+        start, end = _iso_ms(args.start), _iso_ms(args.end)
+    except (ConfigError, ValueError) as e:
+        print(f"whydrop: {e}", file=sys.stderr)
+        return 2
+    if end is not None and end < start:
+        print("whydrop: --end is before --start", file=sys.stderr)
+        return 2
+
+    async def save():
+        store = Store(cfg.db_path)
+        await store.open()
+        try:
+            await store.insert("annotations", start_ms=start, end_ms=end, label=args.label, note=args.note)
+        finally:
+            await store.close()
+    asyncio.run(save())
+    print(f"annotated {args.label} from {args.start}" + (f" to {args.end}" if args.end else ""))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whydrop")
     parser.add_argument("--version", action="version", version=f"whydrop {__version__}")
@@ -140,6 +206,18 @@ def main(argv: list[str] | None = None) -> int:
     only.add_argument("--tcp-only", action="store_true")
     n.add_argument("--max-delay", type=int, default=None, help="skip delays longer than this (seconds)")
     n.add_argument("--enable-7500", action="store_true", help="also test 7500 s TCP (reflector must allow it)")
+    rp = sub.add_parser("replay", help="re-run the analysis over a recorded database (approximate)")
+    rp.add_argument("db", type=Path)
+    rp.add_argument("--from", dest="from_", default=None, help="ISO time")
+    rp.add_argument("--to", default=None, help="ISO time")
+    rp.add_argument("--set", action="append", metavar="NAME=VALUE", help="override an analysis constant")
+    rp.add_argument("--json", action="store_true")
+    an = sub.add_parser("annotate", help="label a scene (reproduced / injected / user-test)")
+    an.add_argument("--config", type=Path, default=None)
+    an.add_argument("--label", required=True, choices=("reproduced", "injected", "user-test"))
+    an.add_argument("--start", required=True, help="ISO time")
+    an.add_argument("--end", default=None, help="ISO time")
+    an.add_argument("--note", default=None)
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:  # argparse exits for --version/--help/errors; main returns the code instead
@@ -150,5 +228,9 @@ def main(argv: list[str] | None = None) -> int:
         return _agent(args)
     if args.cmd == "nat-test":
         return _nat_test(args)
+    if args.cmd == "replay":
+        return _replay(args)
+    if args.cmd == "annotate":
+        return _annotate(args)
     parser.print_help()
     return 0

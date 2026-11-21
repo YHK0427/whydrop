@@ -80,7 +80,7 @@ class Segments:
 
     def _local_good(self, frame: Frame, seg: str) -> bool | None:
         r = frame.samples.get((seg, seg))
-        return None if r is None or frame.lag else r.ok > 0
+        return None if r is None or frame.lag or frame.suspended else r.ok > 0
 
     def step(self, frame: Frame) -> list[SegmentChange]:
         out: list[SegmentChange] = []
@@ -88,7 +88,7 @@ class Segments:
             self._announced = True
             if self._lan == "unobservable":
                 out.append(SegmentChange(frame.t_ms, "lan", "unobservable"))
-        kinds = {e.kind for e in frame.events}
+        kinds = {e.kind for e in frame.events} if not frame.suspended else set()
         for seg in LOCAL:
             forced = (seg == "wifi" and "reassoc" in kinds) or (seg == "link" and "link_flap" in kinds)
             held = self.local[seg]
@@ -103,7 +103,9 @@ class Segments:
         if lan_before == "down" and self._lan == "up":
             self.last_recovery_ms = frame.t_ms
             self._local_up_ms = max(self._local_up_ms, frame.t_ms)
-        if not (frame.lag or frame.suspended):
+        if frame.lag or frame.suspended:
+            self._stream_bad_prev = False
+        else:
             out += self._step_line(frame)
             out += self._step_dns(frame)
         return out
@@ -201,11 +203,12 @@ class Segments:
 
     def _line_recovery(self, t: int, rows) -> list[SegmentChange]:
         out = []
-        if rows and all(not x[3] for x in rows):
+        basic = [x for x in rows if x[0] not in REFLECTOR]   # the end is never the canary (spec §6.1)
+        if any(not x[3] for x in basic):
             if self._first_ok is None:
                 self._first_ok = t
-        elif any(x[3] for x in rows):
-            self._first_ok = None
+        elif basic:
+            self._first_ok = None                      # every basic send failed again
         recovered = self._first_ok is not None and t - self._first_ok >= (K.LINE_RECOVER_S - 1) * 1000
         short = K.GATE_SHORT_S * 1000
         if self._gated:

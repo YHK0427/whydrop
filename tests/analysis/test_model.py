@@ -51,7 +51,7 @@ def test_lag_and_suspend_flags():
     frames = fb.ready(T0 + 60_000)
     lag = [f.t_ms - T0 for f in frames if f.lag]
     sleep = [f.t_ms - T0 for f in frames if f.suspended]
-    assert lag == [2000, 3000]
+    assert lag == [0, 1000, 2000, 3000]  # sends up to 3 s before the lag were still waiting for their replies
     assert sleep[0] == 6000 and sleep[-1] == 40_000  # slept 6–10 s, then 30 s of grace
 
 
@@ -86,3 +86,20 @@ def test_override_constant():
             K.override("TIMEOUT_S", "1")
     finally:
         K.SETTLE_S = old
+
+
+def test_old_timestamp_doesnt_walk_hours_of_seconds():
+    fb = FrameBuilder(finalize_lag_ms=4000)
+    fb.add_events([Event("reassoc", T0 - 86_400_000)])   # e.g. "connected since yesterday"
+    fb.add_rows([row(T0)])
+    frames = fb.ready(T0 + 10_000)
+    assert len(frames) <= 700
+
+
+def test_late_reply_for_unbuilt_frame():
+    fb = FrameBuilder(finalize_lag_ms=4000)
+    r = SampleRow(T0, "line_hb", "p", 1, 0, 1)
+    fb.add_rows([r])
+    fb.add_late(T0, "line_hb", "p")
+    [f] = fb.ready(T0 + 5000)
+    assert (f.samples[("line_hb", "p")].lost, f.samples[("line_hb", "p")].late) == (0, 1)

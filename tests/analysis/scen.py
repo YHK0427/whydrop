@@ -56,9 +56,12 @@ class Scenario:
         self.streams.append(Stream(probe, pair, provider, **kw))
         return self
 
-    def fail(self, from_s, to_s, *, probes=None, pairs=None, providers=None, frac=1.0, kind="lost") -> "Scenario":
+    def fail(self, from_s, to_s, *, probes=None, pairs=None, providers=None, frac=1.0, kind="lost",
+             rand=None) -> "Scenario":
         """Sends in [from_s, to_s) fail (kind lost/late/local_fail); `frac` < 1 fails that share, spread evenly."""
-        self._fails.append(((probes, pairs, providers), from_s, to_s, kind, frac))
+        import random
+        rng = random.Random(rand) if rand is not None else None
+        self._fails.append(((probes, pairs, providers), from_s, to_s, kind, frac, rng))
         return self
 
     def internet_down(self, from_s, to_s, **kw) -> "Scenario":
@@ -89,10 +92,10 @@ class Scenario:
         return Context(**base)
 
     def _failing(self, st: Stream, sec: int):
-        for (probes, pairs, providers), a, b, kind, frac in self._fails:
+        for (probes, pairs, providers), a, b, kind, frac, rng in self._fails:
             if a <= sec < b and (probes is None or st.probe in probes) and (pairs is None or st.pair in pairs) \
                     and (providers is None or st.provider in providers):
-                return kind, frac
+                return kind, frac, rng
         return None
 
     def frames(self) -> list[Frame]:
@@ -112,8 +115,11 @@ class Scenario:
                 ok, lost, late, local = n, 0, 0, 0
                 hit = self._failing(st, sec)
                 if hit:
-                    kind, frac = hit
-                    bad = round(n * frac) if n > 1 else int((sec * 7919 + sum(st.pair.encode()) % 97) % 100 < frac * 100)
+                    kind, frac, rng = hit
+                    if rng is not None:
+                        bad = sum(rng.random() < frac for _ in range(n))     # independent per send
+                    else:
+                        bad = round(n * frac) if n > 1 else int((sec * 7919 + sum(st.pair.encode()) % 97) % 100 < frac * 100)
                     ok -= bad
                     lost, late, local = (bad, 0, 0) if kind == "lost" else (0, bad, 0) if kind == "late" else (0, 0, bad)
                 rtt = next((r for probes, a, b, r in self._rtt if a <= sec < b and (probes is None or st.probe in probes)),

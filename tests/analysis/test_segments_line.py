@@ -58,8 +58,10 @@ def test_lag_excluded():
 
 
 def test_suspend_excluded():
-    _, ch = run(Scenario.default(400).suspend(30, 330))
-    assert [c for c in ch if c.state == "down"] == []
+    _, ch = run(Scenario.default(400).suspend(30, 100).internet_down(100, 110).fail(100, 110, probes={"wifi"}))
+    assert [c for c in ch if c.state == "down"] == []  # failures right after waking (resume + 30 s) don't count
+    _, ch = run(Scenario.default(400).internet_down(100, 110))
+    assert [c.segment for c in ch if c.state == "down"] == ["line"]  # control
 
 
 def test_router_dns_alone_is_dns_router_not_line():
@@ -90,3 +92,19 @@ def test_queueing_evidence_from_late_replies():
     _, ch = run(Scenario.default(90).internet_down(30, 35, kind="late"))
     [down] = [c for c in ch if c.segment == "line" and c.state == "down"]
     assert down.detail["queueing_evidence"] is True
+
+
+def test_end_ignores_the_canary():
+    s = Scenario.default(120, mode="precision").internet_down(30, 40).fail(40, 45, probes={"canary"})
+    _, ch = run(s)
+    assert of(ch, "line") == [(30, "down"), (40, "up")]
+
+
+def test_random_iid_loss_no_false_line_downs():
+    """Spec §6.2 gate: random per-send loss must not read as line drops (simulated 0/0/2/0 per hour)."""
+    for frac, allowed in ((0.05, 0), (0.10, 0), (0.20, 1), (0.30, 1)):
+        s = Scenario.default(1200).fail(0, 1200, probes={"line_hb", "stun", "tcp_connect", "dns"}, frac=frac,
+                                        rand=7)
+        _, ch = run(s)
+        downs = [c for c in ch if c.segment == "line" and c.state == "down"]
+        assert len(downs) <= allowed, (frac, len(downs))

@@ -114,8 +114,11 @@ class Conditions:
         # weak signal: absolute and relative to the 1 h median (Windows without dBm: never evaluated)
         wifi = frame.samples.get(("wifi", "wifi"))
         dbm = None
-        if wifi is not None and wifi.extra_json:
-            dbm = json.loads(wifi.extra_json).get("signal_dbm")
+        if wifi is not None and wifi.extra_json and not frame.suspended:
+            try:
+                dbm = json.loads(wifi.extra_json).get("signal_dbm")
+            except (ValueError, AttributeError):
+                dbm = None
         if dbm is not None:
             self._rssi.append((t, dbm))
         while self._rssi and self._rssi[0][0] <= t - 3_600_000:
@@ -167,7 +170,7 @@ class Conditions:
         for q in self._rtt.values():
             while q and q[0][0] <= t - K.LATENCY_WINDOW_S * 1000:
                 q.popleft()
-        if self.baseline_state(t) == "none" or busy or frame.lag:
+        if self.baseline_state(t) == "none" or busy or frame.lag or frame.suspended:
             return self._set("latency", False, t)
         slow = set()
         for pair, q in self._rtt.items():

@@ -30,7 +30,7 @@ class Final:
 
 def _cause(rule: str, label: str | None = None, **kw) -> Cause:
     lab, step = texts.CAUSES[rule]
-    return Cause(rule.split("_")[0] if rule.startswith(("R5_", "R1a_", "R6_")) else rule, label or lab, step, **kw)
+    return Cause(rule.split("_")[0], label or lab, step, **kw)
 
 
 def _events(inc: Incident, kind: str, a_ms: int, b_ms: int) -> list:
@@ -42,8 +42,10 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
     and ≥ +50 ms, or most sends behind the line down came back late."""
     if any(d.detail.get("queueing_evidence") for d in inc.downs if d.segment == "line"):
         return True, False
+    if cond is None or cond.baseline_state(inc.start_ms) == "none":
+        return False, False  # no baseline in the first hour
     a, b = inc.start_ms - K.QUEUE_LOOKBACK_S * 1000, inc.start_ms
-    slow, gw_slow, gw_before = 0, False, []
+    slow, gw_slow, gw_before = set(), False, []
     for f in frames:
         if f.t_ms >= b or f.t_ms < a - 600_000:
             continue
@@ -56,18 +58,22 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
             base = cond.baseline(pair) if cond else None
             if p in RTT_SOURCES and r.ok and r.rtt_avg is not None and base is not None \
                     and r.rtt_avg >= K.LATENCY_FACTOR * base and r.rtt_avg >= base + K.LATENCY_PLUS_MS:
-                slow += 1
+                slow.add(pair)
         if gw is not None and gw.rtt_avg is not None and gw_before:
             g0 = min(gw_before)
             gw_slow |= gw.rtt_avg >= K.LATENCY_FACTOR * g0 and gw.rtt_avg >= g0 + K.LATENCY_PLUS_MS
-    return slow >= 2, gw_slow
+    return len(slow) >= 2, gw_slow  # two different pairs, not one slow pair twice
 
 
 def _direction(inc: Incident, frames) -> dict:
     up = down = 0
     outs = [e for e in inc.events if e.kind == "udp_outage"]
     if outs:
+        if any(e.detail.get("status") == "unknown" for e in outs):
+            return {"direction": "unknown"}
         up = sum(e.detail.get("lost_up") or 0 for e in outs)
+        if any(e.detail.get("status") == "down_unmeasurable" for e in outs):
+            return {"direction": "upload", "lost_up": up, "lost_down": None}  # nothing came back to judge down by
         down = sum(e.detail.get("lost_down") or 0 for e in outs)
     else:
         for f in frames:
@@ -81,21 +87,31 @@ def _direction(inc: Incident, frames) -> dict:
 
 
 def classify(inc: Incident, frames, cond, ctx: Context) -> Cause:
+    if inc.point == "idle_state_lost":
+        iv, limit = inc.evidence.get("interval_s"), ctx.nat_tcp_timeout_s
+        rule = "R5" if iv is None or limit is None else "R5_expiry" if iv > limit else "R5_loss"
+        return _cause(rule, evidence=dict(inc.evidence))
     if inc.point:
         return _cause(POINT_RULES[inc.point], evidence=dict(inc.evidence))
     segs, s = inc.segments, inc.start_ms
-    if "wifi" in segs or _events(inc, "reassoc", s - K.R1A_BEFORE_S * 1000, s + K.R1A_AFTER_S * 1000) \
+
+    def near(seg, before, after):
+        return any(d.segment == seg and s - before * 1000 <= d.t_ms <= s + after * 1000 for d in inc.downs)
+    if near("wifi", K.R1A_BEFORE_S, K.R1A_AFTER_S) \
+            or _events(inc, "reassoc", s - K.R1A_BEFORE_S * 1000, s + K.R1A_AFTER_S * 1000) \
             or _events(inc, "roam", s - K.R1A_BEFORE_S * 1000, s + K.R1A_AFTER_S * 1000):
         return _cause("R1a", secondary=_secondary(inc))
-    if "link" in segs or _events(inc, "link_flap", s - K.R1C_WINDOW_S * 1000, s + K.R1C_WINDOW_S * 1000):
+    if near("link", K.R1C_WINDOW_S, K.R1C_WINDOW_S) \
+            or _events(inc, "link_flap", s - K.R1C_WINDOW_S * 1000, s + K.R1C_WINDOW_S * 1000):
         return _cause("R1c", secondary=_secondary(inc))
-    if "host_net" in segs:
+    if near("host_net", K.R1A_BEFORE_S, K.R1A_AFTER_S):
         return _cause("R1d")
     queued, at_home = _queueing(inc, frames, cond)
     if queued and segs & {"lan", "line"}:
         return _cause("R7", texts.IN_HOME_QUEUEING if at_home else texts.QUEUEING_TIMEOUTS)
-    if "lan" in segs and ctx.link_kind != "unknown" and not ctx.vpn:
-        return _cause("R1b", secondary=_secondary(inc))
+    if "lan" in segs:
+        known = ctx.link_kind != "unknown" and not ctx.vpn
+        return _cause("R1b" if known else "R1b_unobservable", secondary=_secondary(inc))
     end = inc.end_ms if inc.end_ms is not None else s
     if _events(inc, "ip_change", s, end + K.R4_AFTER_S * 1000):
         sec = ["R2"] if "line" in segs else []
@@ -104,9 +120,12 @@ def classify(inc: Incident, frames, cond, ctx: Context) -> Cause:
         return _cause("R4", secondary=sec)
     dns = segs & {"dns_router", "dns_isp", "dns_public"}
     if dns and "line" not in segs:
-        return _cause("R3", texts.R3_LABELS[_r3_kind(dns)], evidence={"classes": sorted(dns)})
+        kind = _r3_kind(dns)
+        if kind == "router" and not ctx.isp_dns_known:
+            kind = "router_upstream"
+        return _cause("R3", texts.R3_LABELS[kind], evidence={"classes": sorted(dns)})
     if "line" in segs:
-        return _cause("R2", evidence=_direction(inc, frames))
+        return _cause("R2" if ctx.lan_observable else "R2_unobservable", evidence=_direction(inc, frames))
     return _cause("unknown")
 
 
@@ -174,18 +193,20 @@ def protocol_paragraph(inc: Incident) -> str:
             continue
         d = e.detail
         a, b = d.get("from_seq"), d.get("to_seq")
-        sent = (b - a) if a is not None and b is not None else None
-        up, down = d.get("lost_up"), d.get("lost_down")
-        if sent and up == sent:
-            what = "all lost upstream"
-        elif sent and down == sent:
-            what = "all lost downstream"
-        elif up is not None and down is not None:
-            what = f"{up} lost upstream, {down} downstream"
-        else:
+        gap = (b - a - 1) if a is not None and b is not None else None   # seqs between the ECHO before and after
+        up, down, status = d.get("lost_up"), d.get("lost_down"), d.get("status")
+        if status == "unknown" or up is None:
             what = "direction unknown (the reflector restarted)"
-        reached = sent - up if sent is not None and up is not None else None
-        parts.append(f"UDP: sent seq {a}–{b}; reflector recv_count +{max(0, reached - 1) if reached else 0} → {what}.")
+        elif up == gap:
+            what = "all lost upstream"
+        elif status == "ok" and down == gap and not up:
+            what = "all lost downstream"
+        elif down is None:
+            what = f"{up} lost upstream; downstream not measurable"
+        else:
+            what = f"{up} lost upstream, {down} downstream"
+        got = gap - up if gap is not None and up is not None else 0          # reached the reflector in the gap
+        parts.append(f"UDP: sent seq {a + 1}–{b - 1}; reflector recv_count +{max(0, got)} → {what}.")
     tcp = []
     if any(e.kind == "stall" and e.detail.get("phase") == "start" for e in inc.events):
         tcp.append("HB got no reply")

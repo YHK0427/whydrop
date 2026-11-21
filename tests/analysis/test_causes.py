@@ -5,6 +5,13 @@ from whydrop.analysis.causes import Settler, classify, protocol_paragraph
 from whydrop.analysis.conditions import Conditions
 from whydrop.analysis.incidents import Incidents
 from whydrop.analysis.segments import Segments
+from whydrop.measure.direction import Echo, outage_totals
+
+
+def outage(a_seq, a_rc, b_seq, b_rc, echoes=1):
+    """udp_outage detail as udp_stream builds it from the ECHO before and the ECHO after a gap."""
+    t = outage_totals(Echo(a_seq, a_rc, 1, 0), Echo(b_seq, b_rc, 1, 0), echoes)
+    return dict(from_seq=a_seq, to_seq=b_seq, lost_up=t.up, lost_down=t.down, status=t.status)
 
 ROUTER, ISP = "dns_router:192.0.2.1:53/udp", "dns_isp:198.51.100.53:53/udp"
 PUBLIC = {"dns_public:1.1.1.1:53/udp", "dns_public:8.8.8.8:53/udp"}
@@ -50,12 +57,13 @@ def test_r1b_router():
 
 def test_r1b_not_with_unknown_link():
     s = Scenario.default(200).fail(30, 40, probes={"gateway"}).internet_down(30, 40)
-    assert rules(s, link_kind="unknown") != ["R1b"]
+    _, finals, _, _ = run(s, link_kind="unknown")
+    assert "can't separate" in finals[0].cause.label and "Router problem" not in finals[0].cause.label
 
 
 def test_r2_line_with_direction():  # scenario 2 (precision): direction added after settle
     s = Scenario.default(260, mode="precision").internet_down(30, 76)
-    s.event("udp_outage", 77, pair="reflector", from_seq=300, to_seq=760, lost_up=460, lost_down=0, status="ok")
+    s.event("udp_outage", 77, pair="reflector", **outage(300, 300, 761, 301))   # only seq 761 got through
     closed, finals, _, _ = run(s)
     [f] = finals
     assert f.cause.rule == "R2" and f.cause.evidence["direction"] == "upload"
@@ -118,7 +126,7 @@ def test_every_cause_says_likely():
 
 def test_protocol_paragraph_example():
     s = Scenario.default(260, mode="precision").internet_down(30, 76)
-    s.event("udp_outage", 77, pair="reflector", from_seq=1201, to_seq=1660, lost_up=459, lost_down=0, status="ok")
+    s.event("udp_outage", 77, pair="reflector", **outage(1200, 1200, 1661, 1201))
     s.event("stall", 33, pair="reflector", phase="start", canary="hot")
     for i, rto in enumerate((200, 400, 800, 1600, 3200)):
         s.event("tcp_info", 34 + i, pair="reflector", rto_ms=rto, retransmits=i + 1, canary="hot")
@@ -126,3 +134,38 @@ def test_protocol_paragraph_example():
     closed, finals, frames, _ = run(s)
     text = protocol_paragraph(closed[0])
     assert "seq 1201–1660" in text and "all lost upstream" in text and "0.2 → 3.2 s" in text and "no RST" in text
+
+
+def test_download_only_outage_direction():
+    s = Scenario.default(260, mode="precision").internet_down(30, 76)
+    s.event("udp_outage", 77, pair="reflector", **outage(300, 300, 761, 761))   # all reached; echoes lost
+    _, finals, _, _ = run(s)
+    assert finals[0].cause.evidence["direction"] == "download"
+
+
+def test_router_dns_without_isp_known_says_upstream():
+    _, finals, _, _ = run(Scenario.default(200).fail(30, 60, pairs={ROUTER}), isp_dns_known=False)
+    assert "upstream" in finals[0].cause.label
+
+
+def test_unobservable_lan_line_drop_label():
+    _, finals, _, _ = run(Scenario.default(200).internet_down(30, 40), lan_observable=False)
+    assert finals[0].cause.rule == "R2" and "can't separate" in finals[0].cause.label
+
+
+def test_r5_expiry_vs_loss():
+    s = Scenario.default(200, mode="precision").event("idle_state_lost", 60, interval_s=600, waited_s=605)
+    _, finals, _, _ = run(s, nat_tcp_timeout_s=300)
+    assert "expired" in finals[0].cause.label
+    _, finals, _, _ = run(s, nat_tcp_timeout_s=1200)
+    assert "before its timeout" in finals[0].cause.label
+
+
+def test_wifi_down_late_in_a_line_incident_is_still_r2():
+    s = Scenario.default(300).internet_down(30, 90).fail(60, 70, probes={"wifi"})
+    assert rules(s)[0] == "R2"
+
+
+def test_no_queueing_first_in_first_hour():
+    s = Scenario.default(200).slow(30, 50, probes={"tcp_connect", "stun", "line_hb"}, rtt=400.0).internet_down(50, 55)
+    assert rules(s) == ["R2"]

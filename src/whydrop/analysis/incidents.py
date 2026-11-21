@@ -179,10 +179,14 @@ class Incidents:
                 self._point("idle_state_lost", e.ts_ms, out, interval_s=interval)
             elif kind == "rst":
                 w = K.NAT_RESET_WINDOW_S
-                if self._near("mapping_reset", e.ts_ms, w) and not self._near("ip_change", e.ts_ms, w):
+                new_port = self._near("mapping_reset", e.ts_ms, w) or [
+                    x for x in self._near("reconnect", e.ts_ms, w) if x.detail.get("new_port")]
+                if new_port and not self._near("ip_change", e.ts_ms, w):
                     self._point("nat_reset", e.ts_ms, out)
             elif kind == "roam":
-                if self._lost_between(e.ts_ms - 5000, e.ts_ms + 5000, ("gateway", "line_hb", "stun", "tcp_connect",
+                busy = self.current is not None or (self.last is not None and self.last.end_ms is not None
+                                                    and e.ts_ms - self.last.end_ms <= K.MERGE_AFTER_END_S * 1000)
+                if not busy and self._lost_between(e.ts_ms - 5000, e.ts_ms + 5000, ("gateway", "line_hb", "stun", "tcp_connect",
                                                                       "udp_stream", "canary", "dns")):
                     self._point("roam_loss", e.ts_ms, out)
         self._pending = keep

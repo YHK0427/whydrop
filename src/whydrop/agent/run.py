@@ -24,6 +24,9 @@ from whydrop.agent.results import Aggregator, Result
 from whydrop.agent.scheduler import LagWatchdog, Scheduler
 from whydrop.agent.selfcheck import CheckPair, FindingsTracker, nat_mapping, run_selfcheck
 from whydrop.agent.store import Store
+from whydrop.analysis.engine import Engine
+from whydrop.analysis.model import Context, FrameBuilder
+from whydrop.analysis.persist import Recorder
 from whydrop.proto.mac import load_secret
 
 log = logging.getLogger("whydrop.agent")
@@ -38,6 +41,8 @@ STORE_FLUSH_S = 5
 BACKOFF_S = (30, 60, 120, 300)
 DNS_CLASSES = ("dns_router", "dns_isp", "dns_public")
 PRECISION_EVERY_S = 5
+ANALYSIS_START_S = 30   # first frames wait until we know whether the gateway ever answers
+STRIP_MS = 60_000       # packet strip kept ±60 s around incidents (spec §7)
 DEGRADED_AFTER_S = 30      # both precision paths failing this long, with the line fine → "precision degraded"
 LINE_FRESH_MS = 15_000
 ECHO_FRESH_MS = 10_000
@@ -86,6 +91,14 @@ class Agent:
         self._pfail_since: int | None = None
         self._standing: set[str] = set()
         self._canaries: list[asyncio.Task] = []
+        self._providers: dict[str, str] = {}
+        self._gw_seen = False
+        self.fb = FrameBuilder()
+        self.engine: Engine | None = None
+        self.recorder = Recorder(self.store, on_incident=self._strip)
+        self._started = None
+        self.store.listeners.append(lambda rows, events: (self.fb.add_rows(rows), self.fb.add_events(events)))
+        self.store.late_listeners.append(self.fb.add_late)
 
     # ---------- helpers ----------
     def now(self) -> int:
@@ -111,6 +124,10 @@ class Agent:
             if isinstance(x, Result):
                 self.agg.add(x)
                 self.findings.feed(x)
+                if x.provider:
+                    self._providers[x.pair] = x.provider
+                if x.probe == "gateway" and x.ok:
+                    self._gw_seen = True
                 if x.ok and x.probe in ("line_hb", "tcp_connect", "stun"):  # basic external probes
                     self._line_ok_ms = self.now()
             else:
@@ -396,7 +413,17 @@ class Agent:
 
     async def job_heartbeat(self):
         await self.store.run_heartbeat(self.run_id, self.now())
+        await self.save_analysis_meta()
         await self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels))
+
+    async def save_analysis_meta(self):
+        """What replay needs to rebuild the analysis context."""
+        await self.store.meta_set("pair_providers", json.dumps(self._providers))
+        await self.store.meta_set("excluded", json.dumps({"pairs": sorted(self.targets.excluded),
+                                                        "providers": sorted(self.targets.excluded_providers)}))
+        await self.store.meta_set("analysis_context", json.dumps({
+            "lan_observable": self._gw_seen, "vpn": bool(self.env and self.env.egress_vpn),
+            "link_kind": self.env.link if self.env else "unknown", "intervals": dict(self.cfg.intervals)}))
 
     # ---------- precision mode ----------
     def pevent(self, e: Event) -> None:
@@ -409,7 +436,7 @@ class Agent:
         await self.stream.start()
         sid = self.stream.session_id
         self.hot = HotCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
-                             udp_rtt=self.stream.rtt_median_ms)
+                             udp_rtt=self.stream.rtt_median_ms, on_result=lambda r: self.agg.add(r))
         self.idle = IdleCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
                                interval_s=self.cfg.canary_idle_interval_s)
         self._canaries = [self.spawn(self.hot.run(self.stop), "hot canary"),
@@ -438,6 +465,34 @@ class Agent:
             self._standing.discard(kind)
             await self.store.execute("UPDATE findings SET end_ms = ? WHERE agent_id = ? AND kind = ? AND end_ms IS NULL",
                                      (self.now(), self.store.agent_id, kind))
+
+    # ---------- analysis ----------
+    def analysis_context(self) -> Context:
+        return Context(provider_of=self._providers.get, excluded_pairs=self.targets.excluded,
+                       excluded_providers=self.targets.excluded_providers,
+                       mode="precision" if self.precision else "basic", lan_observable=self._gw_seen,
+                       vpn=bool(self.env and self.env.egress_vpn), link_kind=self.env.link if self.env else "unknown",
+                       intervals=dict(self.cfg.intervals))
+
+    async def job_analysis(self):
+        if self.engine is None:
+            self._started = self._started or self.now()
+            if self.now() - self._started < ANALYSIS_START_S * 1000:
+                return
+            self.engine = Engine(self.analysis_context(), reopen=await self.recorder.load_open())
+        for frame in self.fb.ready(self.now()):
+            await self.recorder.write(self.engine.step(frame))
+
+    def _strip(self, op: str, inc) -> None:
+        """Keep the per-packet strip around incidents (the in-memory ring holds 120 s)."""
+        if self.stream is None or op not in ("open", "close"):
+            return
+        at = inc.start_ms if op == "open" else inc.end_ms
+        rows = self.stream.book.ring_window(at - STRIP_MS, at + STRIP_MS)
+        if rows:
+            self.spawn(self.store.executemany(
+                "INSERT OR IGNORE INTO udp_seq_ring (agent_id, ts_ms, seq, echoed, dir) VALUES (?, ?, ?, ?, ?)",
+                [(self.store.agent_id, t, q, int(e), d) for t, q, e, d in rows if q >= 0]), "packet strip")
 
     # ---------- main ----------
     async def wait_route(self) -> bool:
@@ -468,6 +523,7 @@ class Agent:
         s.every("netwatch", NETWATCH_EVERY_S, self.job_netwatch, phase_s=NETWATCH_EVERY_S)
         s.every("selfcheck", SELFCHECK_EVERY_S, self._periodic_selfcheck, phase_s=SELFCHECK_EVERY_S)
         s.every("heartbeat", 30.0, self.job_heartbeat, phase_s=30)
+        s.every("analysis", 1.0, self.job_analysis, phase_s=0.95)
         s.every("housekeeping", 600.0, lambda: housekeep(self.store, self.now(),
                                                          min_free_mb=self.cfg.storage_min_free_mb), phase_s=60)
 
@@ -518,7 +574,9 @@ class Agent:
         self.schedule()
         if self.precision:
             await self.start_precision()
-        watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now)
+        watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now,
+                               on_sample=lambda lag: self.agg.add(Result("loop", "loop", None, self.now(), True,
+                                                                        lag * 1000)))
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
         log.info("watching: mode=" + self.tags["mode"] + " link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
                  _mask(self.env.gateway), ",".join(_mask(a) for a in self.env.isp_dns) or "unknown",
@@ -544,6 +602,7 @@ class Agent:
         if self.agg:
             steps.append(lambda: self.agg.flush_ready(force=True))
         if self.run_id is not None:
+            steps.append(self.save_analysis_meta)
             steps.append(lambda: self.store.run_stop(self.run_id, self.now()))
         for step in steps:  # each on its own, so one failure can't skip closing the store
             try:

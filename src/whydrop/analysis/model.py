@@ -31,6 +31,8 @@ class Context:
     vpn: bool = False
     link_kind: str = "unknown"          # "wifi" | "wired" | "unknown"
     intervals: dict = field(default_factory=dict)
+    isp_dns_known: bool = True          # router-only DNS failure reads "or its upstream" without it
+    nat_tcp_timeout_s: int | None = None  # lower bound from the last nat-test (R5 expiry vs loss)
 
     def provider(self, probe: str, pair: str) -> str | None:
         if probe in ("udp_stream", "canary"):
@@ -90,14 +92,34 @@ class FrameBuilder:
             if self.next_ms is None:
                 self.next_ms = b
 
-    def _covered(self, spans, t: int) -> bool:
-        return any(s <= t + 999 and (e is None or t <= e) for s, e in spans)
+    def _covered(self, spans, t: int, reach_ms: int = 0) -> bool:
+        """Second t overlaps a span; with reach_ms, also when a send at t was still waiting for its reply."""
+        cap = K.LAG_SPAN_CAP_S * 1000
+        return any(s <= t + 999 + reach_ms and t <= (e if e is not None else s + cap) for s, e in spans)
+
+    def add_late(self, ts_ms: int, probe: str, pair: str, direction: str | None = None) -> None:
+        """A late reply for a send in a frame not built yet (the store already wrote the row)."""
+        r = self._rows.get(ts_ms, {}).get((probe, pair))
+        if r is None:
+            return
+        r.late += 1
+        r.lost = max(0, r.lost - 1)
+        if direction:
+            col = {"up": "lost_up", "down": "lost_down"}.get(direction, "lost_dir_unknown")
+            setattr(r, col, max(0, getattr(r, col) - 1))
 
     def ready(self, now_ms: int) -> list[Frame]:
         out = []
+        floor = (now_ms - self.lag_ms - K.MAX_BACKLOG_S * 1000) // 1000 * 1000
+        if self.next_ms is not None and self.lag_ms and self.next_ms < floor:
+            for d in (self._rows, self._events):     # never walk hours of empty seconds: start near now
+                for k in [k for k in d if k < floor]:
+                    del d[k]
+            self.next_ms = floor
         while self.next_ms is not None and self.next_ms + 1000 <= now_ms - self.lag_ms:
             t = self.next_ms
-            out.append(Frame(t, self._rows.pop(t, {}), self._events.pop(t, []), self._covered(self._lag, t),
+            out.append(Frame(t, self._rows.pop(t, {}), self._events.pop(t, []),
+                             self._covered(self._lag, t, K.MAX_TIMEOUT_S * 1000),
                              self._covered(self._sleep, t)))
             self.next_ms += 1000
         horizon = (self.next_ms or 0) - 3_600_000
