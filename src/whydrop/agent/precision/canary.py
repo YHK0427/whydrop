@@ -141,11 +141,23 @@ class HotCanary(_Canary):
     role = Role.HOT
 
     def __init__(self, reflector, secret, on_event, *, hb_s: float = 1.0, stall_s: float = 3.0,
-                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, **kw):
+                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, udp_rtt=None, **kw):
         super().__init__(reflector, secret, on_event, **kw)
         self.hb_s, self.stall_s, self.reconnect_stall_s, self.tcp_info_s = hb_s, stall_s, reconnect_stall_s, tcp_info_s
         self._rtts: deque[float] = deque(maxlen=20)
         self.rtt_ms: float | None = None
+        self.udp_rtt = udp_rtt          # () -> udp_stream RTT median, for the middlebox check
+        self.middlebox = False
+
+    def _check_middlebox(self) -> None:
+        """A TCP answer much faster than UDP over the same path means something nearer ends the TCP connection."""
+        u = self.udp_rtt() if self.udp_rtt else None
+        if u is None or len(self._rtts) < 10:
+            return
+        flag = self.rtt_ms < 0.5 * u
+        if flag != self.middlebox:
+            self.middlebox = flag
+            self.emit("middlebox", flag=flag, canary_ms=round(self.rtt_ms, 2), udp_ms=round(u, 2))
 
     async def _session(self, reader, writer, stop) -> str:
         sent: dict[int, int] = {}
@@ -174,6 +186,7 @@ class HotCanary(_Canary):
                 if t0 is not None:
                     self._rtts.append((time.perf_counter_ns() - t0) / 1e6)
                     self.rtt_ms = sorted(self._rtts)[len(self._rtts) // 2]
+                    self._check_middlebox()
                 st["last_ack"] = self.mono()
                 if st["stall_at"] is not None:
                     self.emit("stall", phase="end", duration_s=round(self.mono() - st["stall_at"], 2))
@@ -192,8 +205,10 @@ class HotCanary(_Canary):
                     return "stall"
 
         async def tcp_info():
-            while True:
-                await asyncio.sleep(1.0 if st["stall_at"] is not None else self.tcp_info_s)
+            first = True
+            while True:  # a baseline 1 s after connecting, then every 10 s (1 s during a stall)
+                await asyncio.sleep(1.0 if first or st["stall_at"] is not None else self.tcp_info_s)
+                first = False
                 info = read_tcp_info(sock) if sock is not None else None
                 if info:
                     self.emit("tcp_info", **info)

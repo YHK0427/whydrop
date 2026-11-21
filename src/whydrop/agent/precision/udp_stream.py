@@ -152,6 +152,7 @@ class UdpStream:
         self._tasks: list[asyncio.Task] = []
         self._last_epoch: int | None = None
         self._reconnect: asyncio.Task | None = None
+        self.last_echo_ms: int | None = None
         self._warned = -1e9
 
     @property
@@ -210,6 +211,7 @@ class UdpStream:
         if p.type != WdType.ECHO or p.session_id != self.session_id:
             return
         traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
+        self.last_echo_ms = self.tb.now_ms()
         if self._last_epoch is not None and p.epoch != self._last_epoch:
             self.on_event(Event("reflector_restart", self.tb.now_ms(), "reflector", {"epoch": p.epoch}))
         self._last_epoch = p.epoch

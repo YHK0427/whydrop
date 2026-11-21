@@ -1,6 +1,7 @@
 """run_agent wiring with every network call replaced by fakes (no packets leave the machine)."""
 import asyncio
 import json
+import socket
 import sqlite3
 
 import pytest
@@ -253,3 +254,85 @@ def test_selfcheck_covers_tcp_for_every_tcp_probed_class(fakes):
     names, tcp_probed = asyncio.run(main())
     assert all(f"{c}:{addr}:53/tcp" in names for c, addr in tcp_probed)
     assert "dns_isp:198.51.100.53:53/tcp" in names  # found on the real home network: one ISP resolver refuses TCP
+
+
+
+# ---------- precision mode against the real Plan 1 reflector on loopback ----------
+SECRET = "s" * 40
+
+
+async def _reflector(secret=SECRET, port=0):
+    from whydrop.reflector.replay import Tombstones
+    from whydrop.reflector.tcp import TcpReflector, serve_tcp
+    from whydrop.reflector.udp import UdpReflector, serve_udp
+    u = await serve_udp(UdpReflector(secret.encode(), epoch=3, tombstones=Tombstones(None)), "127.0.0.1", port)
+    t = await serve_tcp(TcpReflector(secret.encode(), epoch=3), "127.0.0.1", u.port)
+    return u, t
+
+
+def precision_cfg(tmp_path, monkeypatch, port):
+    monkeypatch.setenv("WHYDROP_SECRET", SECRET)
+    return load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "w.db"), "WHYDROP_REFLECTOR": f"127.0.0.1:{port}"})
+
+
+def run_with(cfg, seconds, reflector_secret=SECRET, with_reflector=True):
+    async def go():
+        port = int(cfg.reflector.rsplit(":", 1)[1])
+        servers = await _reflector(reflector_secret, port) if with_reflector else None
+        stop = asyncio.Event()
+        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        await asyncio.sleep(seconds)
+        stop.set()
+        await asyncio.wait_for(task, 10)
+        if servers:
+            await servers[0].close()
+            servers[1].close()
+        return port
+    return asyncio.run(go())
+
+
+def test_precision_e2e(fakes, monkeypatch, tmp_path):
+    import sys
+
+    async def port():
+        u, t = await _reflector()
+        p = u.port
+        await u.close()
+        t.close()
+        return p
+    p = asyncio.run(port())
+    cfg = precision_cfg(tmp_path, monkeypatch, p)
+    run_with(cfg, 5.0)
+    [(sent, ok, lost)] = db(cfg, "select sum(sent), sum(ok), sum(lost) from samples_1s where probe = 'udp_stream'")
+    assert 30 <= sent <= 55 and lost == 0 and ok == sent
+    kinds = {k for (k,) in db(cfg, "select kind from events")}
+    assert "auth_fail" not in kinds and ("tcp_info" in kinds) == sys.platform.startswith("linux")
+    assert json.loads(db(cfg, "select tags_json from agent_runs")[0][0])["mode"] == "precision"
+    assert db(cfg, "select kind from findings where kind != 'vpn_egress'") == []
+
+
+def test_reflector_down_is_precision_degraded_not_incident(fakes, monkeypatch, tmp_path):
+    monkeypatch.setattr(runmod, "PRECISION_EVERY_S", 0.3)
+    monkeypatch.setattr(runmod, "DEGRADED_AFTER_S", 1)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    free = s.getsockname()[1]
+    s.close()
+    cfg = precision_cfg(tmp_path, monkeypatch, free)
+    run_with(cfg, 3.5, with_reflector=False)
+    found = [k for (k,) in db(cfg, "select kind from findings")]
+    assert found == ["precision_degraded"]
+
+
+def test_wrong_secret_is_secret_mismatch(fakes, monkeypatch, tmp_path):
+    monkeypatch.setattr(runmod, "PRECISION_EVERY_S", 0.3)
+
+    async def port():
+        u, t = await _reflector()
+        p = u.port
+        await u.close()
+        t.close()
+        return p
+    cfg = precision_cfg(tmp_path, monkeypatch, asyncio.run(port()))
+    run_with(cfg, 2.0, reflector_secret="z" * 40)
+    assert "secret_mismatch" in [k for (k,) in db(cfg, "select kind from findings")]

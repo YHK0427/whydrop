@@ -1,4 +1,5 @@
-"""`whydrop agent` (basic mode): startup order, probe schedule, persistence (spec §5.1, §5.2, §5.6)."""
+"""`whydrop agent`: startup order, probe schedule, persistence (spec §5.1, §5.2, §5.6), and in precision mode
+the udp_stream and TCP canaries to the reflector (§5.3)."""
 import asyncio
 import json
 import logging
@@ -12,7 +13,9 @@ from whydrop.agent.clock import TimeBase, wait_time_sync
 from whydrop.agent.config import Config
 from whydrop.agent.events import Event
 from whydrop.agent.housekeeping import housekeep
-from whydrop.agent.precision import precision_enabled
+from whydrop.agent.precision import precision_enabled, reflector_addr
+from whydrop.agent.precision.canary import HotCanary, IdleCanary
+from whydrop.agent.precision.udp_stream import UdpStream
 from whydrop.agent.probes import dns_probe, gateway, host_net, line_hb, link, tcp_connect, wifi
 from whydrop.agent.probes.stun_probe import StunWatcher
 from whydrop.agent.probes.targets import Targets, mask_pair, pair_id
@@ -21,6 +24,7 @@ from whydrop.agent.results import Aggregator, Result
 from whydrop.agent.scheduler import LagWatchdog, Scheduler
 from whydrop.agent.selfcheck import CheckPair, FindingsTracker, nat_mapping, run_selfcheck
 from whydrop.agent.store import Store
+from whydrop.proto.mac import load_secret
 
 log = logging.getLogger("whydrop.agent")
 
@@ -33,6 +37,10 @@ NETWATCH_EVERY_S = 5
 STORE_FLUSH_S = 5
 BACKOFF_S = (30, 60, 120, 300)
 DNS_CLASSES = ("dns_router", "dns_isp", "dns_public")
+PRECISION_EVERY_S = 5
+DEGRADED_AFTER_S = 30      # both precision paths failing this long, with the line fine → "precision degraded"
+LINE_FRESH_MS = 15_000
+ECHO_FRESH_MS = 10_000
 
 
 class VMRefused(RuntimeError):
@@ -71,6 +79,12 @@ class Agent:
         self.run_id: int | None = None
         self.precision = False
         self._gw_open = False  # the gateway answers only on an open port (costs more bytes, spec §10)
+        self.stream: UdpStream | None = None
+        self.hot: HotCanary | None = None
+        self.idle: IdleCanary | None = None
+        self._line_ok_ms: int | None = None
+        self._pfail_since: int | None = None
+        self._standing: set[str] = set()
 
     # ---------- helpers ----------
     def now(self) -> int:
@@ -96,6 +110,8 @@ class Agent:
             if isinstance(x, Result):
                 self.agg.add(x)
                 self.findings.feed(x)
+                if x.ok and x.probe in ("line_hb", "tcp_connect", "stun"):  # basic external probes
+                    self._line_ok_ms = self.now()
             else:
                 events.append(x)
         if events:
@@ -299,6 +315,8 @@ class Agent:
 
     async def job_tick(self):
         events = self.tb.check()
+        if self.idle and any(e.kind == "suspend" for e in events):
+            self.idle.notify_suspend()  # a ping missed while the host slept says nothing about the NAT
         if events:
             await self.store.add_events(events)
 
@@ -374,6 +392,47 @@ class Agent:
     async def job_heartbeat(self):
         await self.store.run_heartbeat(self.run_id, self.now())
         await self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels))
+
+    # ---------- precision mode ----------
+    def pevent(self, e: Event) -> None:
+        self.spawn(self.store.add_events([e]), "precision event")
+
+    async def start_precision(self) -> None:
+        secret = load_secret(os.environ, required=True)
+        addr = reflector_addr(self.cfg)
+        self.stream = UdpStream(addr, secret, self.store, self.tb, pps=self.cfg.udp_stream_pps, on_event=self.pevent)
+        await self.stream.start()
+        sid = self.stream.session_id
+        self.hot = HotCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
+                             udp_rtt=self.stream.rtt_median_ms)
+        self.idle = IdleCanary(addr, secret, self.pevent, session_id=sid, timebase=self.tb,
+                               interval_s=self.cfg.canary_idle_interval_s)
+        self.spawn(self.hot.run(self.stop), "hot canary")
+        self.spawn(self.idle.run(self.stop), "idle canary")
+        self.sched.every("precision", PRECISION_EVERY_S, self.job_precision, phase_s=PRECISION_EVERY_S * 0.9)
+
+    async def job_precision(self):
+        """Standing findings about the reflector path (spec §6.2 reflector_path); never incidents."""
+        now = self.now()
+        line_ok = self._line_ok_ms is not None and now - self._line_ok_ms < LINE_FRESH_MS
+        stream_ok = self.stream.last_echo_ms is not None and now - self.stream.last_echo_ms < ECHO_FRESH_MS
+        failing = line_ok and not stream_ok and self.hot.state != "ok"
+        self._pfail_since = (self._pfail_since or now) if failing else None
+        await self.standing("precision_degraded", failing and now - self._pfail_since >= DEGRADED_AFTER_S * 1000)
+        await self.standing("secret_mismatch", self.hot.state == "auth_failed")
+        await self.standing("tcp_middlebox", self.hot.middlebox)
+
+    async def standing(self, kind: str, on: bool) -> None:
+        if on == (kind in self._standing):
+            return
+        if on:
+            self._standing.add(kind)
+            log.warning("finding: %s", kind)
+            await self.store.insert("findings", kind=kind, start_ms=self.now(), detail_json="{}")
+        else:
+            self._standing.discard(kind)
+            await self.store.execute("UPDATE findings SET end_ms = ? WHERE agent_id = ? AND kind = ? AND end_ms IS NULL",
+                                     (self.now(), self.store.agent_id, kind))
 
     # ---------- main ----------
     async def wait_route(self) -> bool:
@@ -452,6 +511,8 @@ class Agent:
         elif await self.selfcheck() != "ok":
             self.start_selfcheck(after_failed=True)
         self.schedule()
+        if self.precision:
+            await self.start_precision()
         watchdog = LagWatchdog(lambda e: self.spawn(self.store.add_events([e]), "lag event"), now_ms=self.now)
         self.tb.rebase()  # the self-check above took seconds; that is not a suspend
         log.info("watching: mode=" + self.tags["mode"] + " link=%s gateway=%s isp_dns=%s excluded=%s", self.env.link,
@@ -466,6 +527,8 @@ class Agent:
             t.cancel()
         await asyncio.gather(*self._bg, return_exceptions=True)
         steps = []
+        if self.stream:
+            steps.append(lambda: self.stream.stop(flush=True))
         if self.wifi_tracker:
             steps.append(lambda: self.store.meta_set("ap_labels", json.dumps(self.wifi_tracker.labels)))
         if self.agg:

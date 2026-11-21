@@ -226,3 +226,21 @@ def test_windows_abort_is_kernel_timeout():
     assert classify_conn_error(TimeoutError()) == "kernel_timeout"
     assert classify_conn_error(ConnectionResetError()) == "rst"
     assert classify_conn_error(asyncio.IncompleteReadError(b"", 16)) == "eof"
+
+
+def test_middlebox_flag_when_tcp_much_faster_than_udp():
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        c = canary(port, events, hb_s=0.05, udp_rtt=lambda: 100.0)  # loopback TCP < 1 ms vs "100 ms" UDP
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(1.0)
+        stop.set()
+        await task
+        srv.close()
+        return c
+    c = asyncio.run(main())
+    [m] = [e for e in events if e.kind == "middlebox"]
+    assert c.middlebox and m.detail["flag"] is True and m.detail["udp_ms"] == 100.0
