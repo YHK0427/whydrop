@@ -67,13 +67,14 @@ function lane(title, sub, legend, makeChart, tableView) {
 
 export function lanes(data, { stepS, mode, baseline, events = [] }) {
   const sync = uPlot.sync("whydrop");
-  const width = () => Math.max(280, Math.min(1200, document.getElementById("main").clientWidth - 2));
+  const width = (box) => Math.max(200, Math.min(1200, (box || root).clientWidth - 2));   // the content box, not main's padding
   const cursor = { sync: { key: sync.key }, points: { show: false } };
   const axisX = { stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { stroke: css("--rule") } };
   const axisY = (label) => ({ stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { show: false }, label, size: 46 });
   const bars = uPlot.paths.bars({ size: [0.9, 12] });
   const charts = [];
-  const mk = (opts, d) => (box) => { const u = new uPlot({ width: width(), height: opts.height, cursor, legend: { show: false },
+  const root = h("div", { class: "lanes" });
+  const mk = (opts, d) => (box) => { const u = new uPlot({ width: width(box), height: opts.height, cursor, legend: { show: false },
     scales: { x: { time: true } }, ...opts }, d, box); charts.push(u); };
   const stepWord = stepS === 1 ? t("unit.s", { n: 1 }) : stepS < 60 ? t("unit.s", { n: stepS }) : t("unit.min", { n: stepS / 60 });
 
@@ -132,8 +133,8 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
     tcp = h("section", { class: "lane" }, h("div", { class: "lane-head" }, h("h3", {}, t("lane.tcp"))),
       h("p", { class: "faint" }, t("lane.tcp.basic")));
   }
-  const root = h("div", { class: "lanes" }, loss, latency, tcp);
-  const onResize = () => charts.forEach(u => u.setSize({ width: width(), height: u.height }));
+  root.append(loss, latency, tcp);
+  const onResize = () => charts.forEach(u => u.setSize({ width: width(u.root.parentElement), height: u.height }));
   window.addEventListener("resize", onResize);
   root.cleanup = () => { window.removeEventListener("resize", onResize); charts.forEach(u => u.destroy()); };
   return root;

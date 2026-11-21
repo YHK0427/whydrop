@@ -7,7 +7,8 @@ function heatmap(drops) {
   for (const d of drops) { const x = new Date(d.start); grid[(x.getDay() + 6) % 7][x.getHours()] += 1; }
   const max = Math.max(1, ...grid.flat());
   const days = Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(document.documentElement.lang, { weekday: "short" }));
-  const el = h("div", { class: "heat", role: "table", "aria-label": t("net.heatmap") }, h("span"),
+  const total = grid.flat().reduce((a, b) => a + b, 0);
+  const el = h("div", { class: "heat", role: "img", "aria-label": `${t("net.heatmap")}: ${total}` }, h("span"),
     ...Array.from({ length: 24 }, (_, i) => h("span", {}, i % 6 === 0 ? String(i) : "")));
   grid.forEach((row, di) => {
     el.append(h("span", {}, days[di]));

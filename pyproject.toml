@@ -33,4 +33,6 @@ packages = ["src/whydrop"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts", "tests"]
+pythonpath = ["scripts", "tests", "tests/ui"]
+markers = ["ui: browser checks of the dashboard (Playwright + Chromium); run with -m ui"]
+addopts = "-m 'not ui'"
