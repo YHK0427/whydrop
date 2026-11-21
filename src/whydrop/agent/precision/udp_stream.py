@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import statistics
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from whydrop.agent.clock import TimeBase
 from whydrop.agent.events import Event
 from whydrop.agent.probes.base import classify_oserror
 from whydrop.agent.store import SampleRow
-from whydrop.measure.direction import Echo, packet_direction
+from whydrop.measure.direction import Echo, outage_totals, packet_direction
 from whydrop.proto import wd
 from whydrop.proto.wd import WdError, WdPacket, WdType
 
@@ -25,6 +26,8 @@ RECEIVE_MS = 2_000     # an ECHO within 2 s of its send counts as a round trip
 FINAL_MS = 3_500       # bucket t is written at t + 3.5 s (1 s bucket + 2 s window + 0.5 s margin)
 LATE_MS = 11_000       # late ECHOs still update the written row until t + 11 s
 RING_S = 120
+SILENT_REOPEN_S = 20     # no ECHO this long with the socket open → new socket, re-resolve
+OUTAGE_GAP = 30          # an ECHO after this many unanswered seqs closes an outage: count its totals
 PROBE = "udp_stream"
 PAIR = "reflector"
 
@@ -51,6 +54,7 @@ class StreamBook:
         self.echoes: deque[Echo] = deque(maxlen=64)
         self.ring: deque[tuple[int, int, bool, str]] = deque(maxlen=RING_S * pps)
         self.rtts: deque[float] = deque(maxlen=100)
+        self.outages: list[dict] = []
         self.epoch: int | None = None
         self._late_out: list[tuple[int, str]] = []
 
@@ -64,6 +68,12 @@ class StreamBook:
         if self.epoch is not None and e.epoch != self.epoch and self.echoes and e.seq < self.echoes[-1].seq:
             return  # a delayed ECHO from before a reflector restart: ignore it
         self.epoch = e.epoch
+        prev = self.echoes[-1] if self.echoes else None
+        if prev is not None and e.seq - prev.seq > OUTAGE_GAP:
+            got = sum(1 for x in self.echoes if prev.seq < x.seq <= e.seq) + 1
+            tot = outage_totals(prev, e, got)
+            self.outages.append({"from_seq": prev.seq, "to_seq": e.seq, "lost_up": tot.up, "lost_down": tot.down,
+                                 "status": tot.status, "ts_ms": now_ms})
         self.echoes.append(e)
         if s.final:
             if s.dir in ("up", "down", "unknown") and s.echo_after_ms is None and not s.late_counted \
@@ -153,6 +163,8 @@ class UdpStream:
         self._last_epoch: int | None = None
         self._reconnect: asyncio.Task | None = None
         self.last_echo_ms: int | None = None
+        self._opened_at = 0.0
+        self._last_echo_mono = 0.0
         self._warned = -1e9
 
     @property
@@ -169,6 +181,7 @@ class UdpStream:
             self._ip = infos[0][4][0]
             self._transport, _ = await loop.create_datagram_endpoint(lambda: _Proto(self), remote_addr=(self._ip, self.port),
                                                                      family=socket.AF_INET)
+            self._opened_at = time.monotonic()
             return True
         except OSError as e:
             if time.monotonic() - self._warned > 60:  # at most one warning a minute
@@ -181,8 +194,14 @@ class UdpStream:
             await asyncio.sleep(1)
             return False
 
-    async def start(self) -> None:
-        await self._connect()
+    def reopen(self) -> None:
+        """Drop the socket; the send loop opens a new one (re-resolving the reflector). Used after a network change,
+        a long silence, or (Windows) an ICMP error, after which a proactor UDP socket stops receiving."""
+        if self._transport is not None and not self._transport.is_closing():
+            self._transport.close()
+
+    async def start(self) -> None:  # the send loop connects: resolving must not hold up the caller
+        self._reconnect = asyncio.create_task(self._connect())
         self._tasks = [asyncio.create_task(self._send_loop()), asyncio.create_task(self._finalize_loop())]
 
     async def _send_loop(self) -> None:
@@ -200,13 +219,17 @@ class UdpStream:
                 if self._reconnect is None or self._reconnect.done():  # resolving can block: never on the send path
                     self._reconnect = asyncio.create_task(self._connect())
                 continue
+            quiet_since = max(self._opened_at, self._last_echo_mono)
+            if time.monotonic() - quiet_since > SILENT_REOPEN_S:
+                self.reopen()
+                self._opened_at = time.monotonic()  # one reopen per silent period, not one per packet
             self.book.sent(self._seq, now)
             self._transport.sendto(wd.encode(WdPacket(WdType.PROBE, self.session_id, self._seq, time.perf_counter_ns()),
                                              self.secret))
             traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
 
     def _on_datagram(self, data: bytes, addr) -> None:
-        if addr[0] != self._ip:
+        if addr[0] != self._ip or addr[1] != self.port:
             return
         try:
             p = wd.decode(data, self.secret)
@@ -216,6 +239,7 @@ class UdpStream:
             return
         traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
         self.last_echo_ms = self.tb.now_ms()
+        self._last_echo_mono = time.monotonic()
         if self._last_epoch is not None and p.epoch != self._last_epoch:
             self.on_event(Event("reflector_restart", self.tb.now_ms(), "reflector", {"epoch": p.epoch}))
         self._last_epoch = p.epoch
@@ -223,11 +247,18 @@ class UdpStream:
                        self.tb.now_ms())
 
     def _on_error(self, exc: Exception) -> None:
+        if sys.platform == "win32":
+            self.reopen()
         if isinstance(exc, OSError) and classify_oserror(exc).get("local_fail") and self._seq in self.book.pending:
             self.book.pending[self._seq].local_fail = True
 
     async def _write(self, force: bool = False) -> None:
         rows, late = self.book.finalize(self.tb.now_ms(), force=force)
+        for o in self.book.outages:
+            self.on_event(Event("udp_outage", o.pop("ts_ms"), PAIR, o))
+        self.book.outages.clear()
+        if self.last_echo_ms is None:
+            rows = []  # nothing ever answered (wrong secret or host): not loss, the path was never measured
         if rows:
             await self.store.add_samples(rows)
         for ts, d in late:

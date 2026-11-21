@@ -154,7 +154,12 @@ class HotCanary(_Canary):
         self._rtts: deque[float] = deque(maxlen=20)
         self.rtt_ms: float | None = None
         self.udp_rtt = udp_rtt          # () -> udp_stream RTT median, for the middlebox check
+        self._suspend = False
         self.middlebox = False
+
+    def notify_suspend(self) -> None:
+        """The host slept: the connection is stale, and what happens to it now is not network evidence."""
+        self._suspend = True
 
     def _check_middlebox(self) -> None:
         """A TCP answer much faster than UDP over the same path means something nearer ends the TCP connection."""
@@ -201,8 +206,16 @@ class HotCanary(_Canary):
                     self.state = "ok"
 
         async def watchdog():
+            last_run = self.mono()
             while True:
                 await asyncio.sleep(min(0.1, self.hb_s))
+                if self._suspend:
+                    self._suspend = False
+                    st["stall_at"] = None  # no stall/rst evidence from a host that was asleep
+                    return "suspended"
+                if self.mono() - last_run > self.stall_s:  # we ourselves didn't run (loop stall, sleep)
+                    st["last_ack"] = self.mono()
+                last_run = self.mono()
                 quiet = self.mono() - st["last_ack"]
                 if st["stall_at"] is None and sent and quiet > self.stall_s:
                     st["stall_at"] = st["last_ack"]

@@ -15,6 +15,12 @@ def precision_enabled(cfg, env: Mapping[str, str]) -> tuple[bool, str | None]:
             return False, "WHYDROP_SECRET not set"
     except SecretError as e:
         return False, str(e)
+    try:
+        host, _ = reflector_addr(cfg)
+    except ValueError:
+        return False, "reflector must be host or host:port"
+    if not host:
+        return False, "reflector must be host or host:port"
     return True, None
 
 

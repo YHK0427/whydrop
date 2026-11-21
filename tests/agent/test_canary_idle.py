@@ -80,27 +80,39 @@ def test_missing_ping_is_state_lost():
     assert lost and lost[0].detail["interval_s"] == 30
 
 
-def test_idle_lost_suppressed_during_suspend():
+def _suspend_run(suspend):
     events = []
 
     async def main():
         srv, port = await reflector()
         bh = BlackholeAfterHandshake()
         pport = await bh.start(port)
-        c = IdleCanary(("127.0.0.1", pport), S, events.append, session_id=9, interval_s=30, expect_s=0.1, grace_s=0.3)
+        c = IdleCanary(("127.0.0.1", pport), S, events.append, session_id=9, interval_s=30, expect_s=0.1, grace_s=0.3,
+                       verdict_delay_s=0.2)
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
-        for _ in range(10):
+        for _ in range(12):  # past due 0.1 + grace 0.3 + verdict delay 0.2 with margin
             await asyncio.sleep(0.1)
-            c.notify_suspend()  # the host itself was asleep during the wait
+            if suspend:
+                c.notify_suspend()  # the host itself was asleep during the wait
         stop.set()
         await task
         srv.close()
     asyncio.run(main())
-    assert "idle_state_lost" not in [e.kind for e in events]
+    return [e.kind for e in events]
+
+
+def test_idle_lost_suppressed_during_suspend():
+    assert "idle_state_lost" in _suspend_run(False)   # control: the same run without a suspend reports it
+    assert "idle_state_lost" not in _suspend_run(True)
 
 
 def test_suspend_reported_just_after_deadline_still_suppresses():
+    assert "idle_state_lost" in _late(False)
+    assert "idle_state_lost" not in _late(True)
+
+
+def _late(late_report):
     events = []
 
     async def main():
@@ -112,10 +124,11 @@ def test_suspend_reported_just_after_deadline_still_suppresses():
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
         await asyncio.sleep(0.45)          # past due + grace, inside the verdict delay
-        c.notify_suspend()                 # job_tick reports the sleep a moment late
-        await asyncio.sleep(0.3)
+        if late_report:
+            c.notify_suspend()             # job_tick reports the sleep a moment late
+        await asyncio.sleep(0.6)           # beyond the verdict
         stop.set()
         await task
         srv.close()
     asyncio.run(main())
-    assert "idle_state_lost" not in [e.kind for e in events]
+    return [e.kind for e in events]

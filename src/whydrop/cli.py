@@ -104,10 +104,6 @@ def _nat_test(args: argparse.Namespace) -> int:
     print()
     print(natprobe.format_report(rep))
     refused = {r.detail.get("reason") for r in rep.tcp} & {"auth_fail", "version", "busy"}
-    if refused:
-        print(f"whydrop: the reflector refused the TCP test ({', '.join(sorted(refused))}); "
-              "check WHYDROP_SECRET and the reflector version", file=sys.stderr)
-        return 1
     if cfg.db_path.exists():  # an agent is recording here: keep the result next to its data
         from whydrop.agent.store import Store
 
@@ -119,6 +115,10 @@ def _nat_test(args: argparse.Namespace) -> int:
             finally:
                 await store.close()
         asyncio.run(save())
+    if refused:
+        print(f"whydrop: the reflector refused the TCP test ({', '.join(sorted(refused))}); "
+              "check WHYDROP_SECRET and the reflector version", file=sys.stderr)
+        return 1
     return 0
 
 

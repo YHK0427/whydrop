@@ -142,3 +142,95 @@ def test_echo_at_exactly_2000_ms_is_ok():
     book.echo(Echo(1, 1, 1, 0), 2000.0, 12_000)
     [row], _ = book.finalize(now_ms=14_000)
     assert (row.ok, row.late) == (1, 0)
+
+
+class _Sink:
+    def __init__(self):
+        self.rows = []
+
+    async def add_samples(self, rows):
+        self.rows += rows
+
+    async def late_dir(self, *a):
+        pass
+
+
+def test_recovers_after_reflector_was_down_at_start():
+    """Windows: one ICMP port-unreachable used to leave the socket deaf forever."""
+    async def main():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        st = UdpStream(("127.0.0.1", port), S, _Sink(), pps=10)
+        await st.start()
+        await asyncio.sleep(0.6)                    # sends hit a closed port
+        srv = await serve_udp(UdpReflector(S, epoch=1, tombstones=Tombstones(None)), "127.0.0.1", port)
+        await asyncio.sleep(1.5)
+        await st.stop()
+        await srv.close()
+        return st
+    assert asyncio.run(main()).last_echo_ms is not None
+
+
+def test_silence_reopens_the_socket(monkeypatch):
+    import whydrop.agent.precision.udp_stream as us
+    monkeypatch.setattr(us, "SILENT_REOPEN_S", 0.4)
+    calls = []
+
+    async def main():
+        hole = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        hole.bind(("127.0.0.1", 0))                 # listens, never answers
+        st = UdpStream(hole.getsockname(), S, _Sink(), pps=10)
+        orig = st._connect
+
+        async def counted():
+            calls.append(1)
+            return await orig()
+        st._connect = counted
+        await st.start()
+        await asyncio.sleep(1.5)
+        await st.stop()
+        hole.close()
+    asyncio.run(main())
+    assert len(calls) >= 2
+
+
+def test_no_rows_until_anything_ever_answered():
+    async def main():
+        hole = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        hole.bind(("127.0.0.1", 0))
+        sink = _Sink()
+        st = UdpStream(hole.getsockname(), S, sink, pps=10)
+        await st.start()
+        await asyncio.sleep(4.5)  # past the 3.5 s finalize point
+        await st.stop(flush=True)
+        hole.close()
+        return sink
+    assert asyncio.run(main()).rows == []           # a wrong secret or host is not 100 % loss
+
+
+def test_outage_totals_event():
+    book = StreamBook()
+    for seq in range(1, 61):
+        book.sent(seq, 10_000 + seq * 100)
+    book.echo(Echo(1, 1, 1, 0), 20.0, 10_200)
+    book.echo(Echo(60, 41, 1, 0), 20.0, 16_100)    # 59 sent since, 40 reached the reflector, 1 echo back
+    [o] = book.outages
+    assert (o["from_seq"], o["to_seq"], o["lost_up"], o["lost_down"], o["status"]) == (1, 60, 19, 39, "ok")
+
+
+def test_echo_from_wrong_source_or_session_ignored():
+    from whydrop.proto import wd
+    from whydrop.proto.wd import WdPacket, WdType
+    st = UdpStream(("127.0.0.1", 9), S, _Sink())
+    st._ip = "127.0.0.1"
+    st.book.sent(1, 1000)
+    good = wd.encode(WdPacket(WdType.ECHO, st.session_id, 1, 0, recv_count=1, epoch=1), S)
+    st._on_datagram(good, ("127.0.0.2", 9))
+    st._on_datagram(good, ("127.0.0.1", 10))
+    st._on_datagram(wd.encode(WdPacket(WdType.ECHO, st.session_id ^ 1, 1, 0, recv_count=1, epoch=1), S), ("127.0.0.1", 9))
+    st._on_datagram(wd.encode(WdPacket(WdType.ECHO, st.session_id, 1, 0, recv_count=1, epoch=1), b"z" * 32), ("127.0.0.1", 9))
+    assert st.last_echo_ms is None
+    st._on_datagram(good, ("127.0.0.1", 9))
+    assert st.last_echo_ms is not None

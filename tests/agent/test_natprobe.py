@@ -171,3 +171,19 @@ def test_udp_and_tcp_run_together_and_errors_are_inconclusive(monkeypatch):
     rep = asyncio.run(nat_test(("127.0.0.1", 1), S, udp_delays=(10,), tcp_delays=(60,)))
     assert rep.udp[0].alive is None and rep.udp[0].detail["reason"] == "OSError" and rep.tcp[0].alive
     assert abs(started[0][1] - started[1][1]) < 0.1  # TCP didn't wait for UDP
+
+
+def test_full_tcp_delay_set_stays_under_unauthenticated_cap():
+    from whydrop.agent.precision.natprobe import TCP_DELAYS
+
+    async def main():
+        async def instant(d):
+            await asyncio.sleep(0.05)
+        refl = TcpReflector(S, epoch=1, sleep=instant)
+        srv = await serve_tcp(refl, "127.0.0.1", 0)
+        port = srv.sockets[0].getsockname()[1]
+        rep = await nat_test(("127.0.0.1", port), S, udp_delays=(), tcp_delays=TCP_DELAYS, sleep=fast_sleep)
+        srv.close()
+        return rep
+    rep = asyncio.run(main())
+    assert all(r.alive is True for r in rep.tcp), [(r.delay_s, r.alive, r.detail) for r in rep.tcp]

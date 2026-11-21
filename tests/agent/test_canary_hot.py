@@ -244,3 +244,27 @@ def test_middlebox_flag_when_tcp_much_faster_than_udp():
     c = asyncio.run(main())
     [m] = [e for e in events if e.kind == "middlebox"]
     assert c.middlebox and m.detail["flag"] is True and m.detail["udp_ms"] == 100.0
+
+
+def test_suspend_gives_no_stall_or_rst_evidence():
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        p = Proxy(port)
+        pport = await p.start()
+        c = canary(pport, events, hb_s=0.1, stall_s=0.3, retry_s=0.1)
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(0.4)
+        p.hold_until = asyncio.get_running_loop().time() + 1.0   # the host "sleeps": nothing gets through
+        await asyncio.sleep(0.1)
+        c.notify_suspend()
+        await asyncio.sleep(1.5)
+        stop.set()
+        await task
+        srv.close()
+        return c
+    c = asyncio.run(main())
+    kinds = [e.kind for e in events]
+    assert "stall" not in kinds and "rst" not in kinds and "reconnect" in kinds and c.state == "ok"

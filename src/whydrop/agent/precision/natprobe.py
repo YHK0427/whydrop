@@ -4,6 +4,8 @@ import asyncio
 import json
 import os
 import socket
+import sys
+import time
 from dataclasses import dataclass, field
 
 from whydrop.proto import wd, wt
@@ -15,6 +17,7 @@ IMMEDIATE_WAIT_S = 2.0
 AFTER_DELAY_WAIT_S = 5.0
 SECOND_REQ_AFTER_S = 3.0   # Linux conntrack applies its long UDP timer only to flows still active 2 s in
 TRIES = 3
+HANDSHAKES_AT_ONCE = 2   # the reflector allows 4 unauthenticated connections per IP (canaries share it)
 
 
 @dataclass
@@ -64,6 +67,7 @@ class _Replies(asyncio.DatagramProtocol):
     def __init__(self, secret, session_id):
         self.secret, self.sid = secret, session_id
         self.q: asyncio.Queue = asyncio.Queue()
+        self.deaf = False
 
     def datagram_received(self, data, addr):
         try:
@@ -74,7 +78,8 @@ class _Replies(asyncio.DatagramProtocol):
             self.q.put_nowait(p)
 
     def error_received(self, exc):
-        pass
+        if sys.platform == "win32":
+            self.deaf = True  # a proactor UDP socket stops receiving after an ICMP error
 
 
 async def _expect(q: asyncio.Queue, seq: int, arg: int) -> bool:
@@ -108,15 +113,32 @@ async def udp_delay(addr: tuple[str, int], secret: bytes, delay: int, *, sleep=a
         req()  # restarts the delay at the reflector and keeps the flow "established" past the 2 s mark
         await _race(_expect(proto.q, seq, 0), IMMEDIATE_WAIT_S, sleep)
         alive = await _race(_expect(proto.q, seq, 1), delay + AFTER_DELAY_WAIT_S, sleep)
+        if not alive and proto.deaf:
+            return DelayResult("udp", delay, None, {"reason": "socket error during the wait"})
         return DelayResult("udp", delay, bool(alive))
     finally:
         transport.close()
 
 
+_handshakes: dict = {}
+
+
+def _gate() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    if loop not in _handshakes:
+        _handshakes.clear()
+        _handshakes[loop] = asyncio.Semaphore(HANDSHAKES_AT_ONCE)
+    return _handshakes[loop]
+
+
 async def tcp_delay(addr: tuple[str, int], secret: bytes, delay: int, *, sleep=asyncio.sleep) -> DelayResult:
+    gate = _gate()
+    await gate.acquire()
+    released = False
     try:
         reader, writer = await asyncio.wait_for(asyncio.open_connection(*addr, family=socket.AF_INET), 5)
     except (OSError, asyncio.TimeoutError) as e:
+        gate.release()
         return DelayResult("tcp", delay, None, {"reason": f"connect failed: {type(e).__name__}"})
     try:
         nonce = wt.decode_nonce(await asyncio.wait_for(reader.readexactly(20), 5))
@@ -129,16 +151,24 @@ async def tcp_delay(addr: tuple[str, int], secret: bytes, delay: int, *, sleep=a
             known = {t.value: t.name.lower() for t in wt.WtType}
             return DelayResult("tcp", delay, None, {"reason": known.get(head[3], f"type {head[3]}")})
         wt.decode_hello_ok(head + await asyncio.wait_for(reader.readexactly(12), 5), secret, anonce)
+        gate.release()
+        released = True  # the long wait itself runs in parallel
+        began = time.monotonic()
 
         async def probe():
             try:
                 return wt.decode_frame(await reader.readexactly(wt.FRAME_LEN)).type == wt.FrameType.NAT_PROBE
             except (asyncio.IncompleteReadError, ConnectionError, OSError, wt.WtError):
-                return False
-        return DelayResult("tcp", delay, bool(await _race(probe(), delay + AFTER_DELAY_WAIT_S, sleep)))
+                return None  # closed early: why is unknown (reflector restart, sleep), not "forgotten"
+        got = await _race(probe(), delay + AFTER_DELAY_WAIT_S, sleep)
+        if got is None and time.monotonic() - began < delay * 0.9 and sleep is asyncio.sleep:
+            return DelayResult("tcp", delay, None, {"reason": "closed before the delay"})
+        return DelayResult("tcp", delay, bool(got))
     except (asyncio.IncompleteReadError, ConnectionError, asyncio.TimeoutError, wt.WtError, OSError) as e:
         return DelayResult("tcp", delay, None, {"reason": type(e).__name__})
     finally:
+        if not released:
+            gate.release()
         writer.transport.abort()
 
 

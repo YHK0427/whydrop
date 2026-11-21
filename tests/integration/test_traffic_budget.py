@@ -135,14 +135,19 @@ def measure_precision() -> dict[str, float]:
     return asyncio.run(main())
 
 
-def test_traffic_budget_precision():
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("gateway_open", [False, True])
+def test_traffic_budget_precision(gateway_open):
     per_run = measure()
     p = measure_precision()
     iv = load_config(None, {}).intervals
-    gateway = traffic.TCP_SYN + traffic.TCP_RST
+    gateway = (2 * traffic.TCP_SYN + traffic.TCP_SEG + traffic.TCP_RST) if gateway_open else traffic.TCP_SYN + traffic.TCP_RST
+    hb_rate = 2 if gateway_open else 1  # run.py halves line_hb only when the gateway answers on an open port
     pure_acks = 2 * traffic.TCP_SEG  # worst case: neither side piggybacks its ACK on the next frame
     bps = 8 * (gateway / iv["gateway"]
-               + per_run["line_hb"] / (2 * iv["line_hb"])          # 0.5 Hz in precision mode
+               + per_run["line_hb"] / (hb_rate * iv["line_hb"])
                + 3 * per_run["dns"] / iv["dns"]                      # router + 2 ISP at the basic interval
                + 5 * per_run["dns"] / max(iv["dns"], 10)             # 5 public pairs at 10 s
                + per_run["dns_tcp"] / iv["dns_tcp"]

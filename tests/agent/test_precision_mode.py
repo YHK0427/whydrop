@@ -75,3 +75,8 @@ def test_line_hb_half_rate_only_with_open_gateway_port(monkeypatch, tmp_path):
     sent.clear()
     asyncio.run(main(False))
     assert len(sent) == 10
+
+
+def test_bad_reflector_value_is_a_reason():
+    cfg = load_config(None, {"WHYDROP_REFLECTOR": "host:abc"})
+    assert precision_enabled(cfg, SECRET) == (False, "reflector must be host or host:port")

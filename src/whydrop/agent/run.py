@@ -318,6 +318,8 @@ class Agent:
         events = self.tb.check()
         if self.idle and any(e.kind == "suspend" for e in events):
             self.idle.notify_suspend()  # a ping missed while the host slept says nothing about the NAT
+            self.hot.notify_suspend()
+            self.stream.reopen()
         if events:
             await self.store.add_events(events)
 
@@ -381,6 +383,8 @@ class Agent:
         if new.egress_vpn != old.egress_vpn:
             await self.vpn_finding()
         self._stun_key = None
+        if self.stream:
+            self.stream.reopen()  # a connected UDP socket keeps the old source address
         log.info("network changed; re-running self-check")
         self.start_selfcheck()
 
