@@ -152,7 +152,7 @@ class Segments:
         if r is None or frame.lag or frame.suspended or (r.ok == 0 and r.lost == 0):
             return []                                 # no evidence (or only local send failures → host_net)
         through = any(x.ok + x.late > 0 for (p, pair), x in frame.samples.items()   # late: it still crossed the router
-                      if (line_quorum(p, pair, self.ctx) or pair.startswith("dns_router:")) and x.sent - x.local_fail > 0)
+                      if line_quorum(p, pair, self.ctx) and x.sent - x.local_fail > 0)
         if r.ok > 0 or through:
             # a reply from the router, or one from the internet *through* it, proves the router is up; a gateway probe
             # that timed out meanwhile was slow (Wi-Fi power save, queueing), not lost (measured on a Wi-Fi host)

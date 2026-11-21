@@ -107,7 +107,7 @@ class Incidents:
         for e in frame.events:
             if live is not None and e.kind in EVIDENCE_EVENTS:
                 live.events.append(e)
-            elif e.kind in EVIDENCE_EVENTS and self.last is not None and self.last.point is None \
+            elif e.kind in EVIDENCE_EVENTS and self.last is not None and self.last.point is None and not self.last.final \
                     and t - self.last.end_ms <= K.SETTLE_S * 1000:
                 self.last.events.append(e)               # still settling: R4 looks 60 s past the end
 
@@ -132,7 +132,7 @@ class Incidents:
 
         for e in frame.events:
             if e.kind == "ip_change":
-                tgt = self.current or (self.last if self.last and self.last.point is None
+                tgt = self.current or (self.last if self.last and self.last.point is None and not self.last.final
                                        and t - self.last.end_ms <= K.R4_AFTER_S * 1000 else None)
                 if tgt is None:
                     self._point("ip_change", e.ts_ms, out)

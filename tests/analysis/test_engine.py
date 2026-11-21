@@ -1,4 +1,5 @@
 from scen import Scenario
+from whydrop.analysis import texts
 from whydrop.analysis.engine import Engine
 
 
@@ -53,12 +54,17 @@ def test_previous_run_leftovers_closed_with_their_cause(tmp_path):
     assert rows[1][1] == "R2" and cond == [(50_000,)]
 
 
-def test_a_line_drop_after_the_settle_does_not_reopen_a_final_incident():
+def test_a_line_drop_after_a_router_drop_is_finalized_once():
     """Found replaying real data: a line down 80-120 s after a router recovery merged into the router incident after
-    its cause was already final, and the same incident was finalized twice. Final means frozen: it starts a new one."""
-    s = Scenario.default(400).fail(30, 40, probes={"gateway"}).internet_down(30, 40) \
-        .fail(30, 40, pairs={"dns_router:192.0.2.1:53/udp"}).internet_down(140, 150)
-    eng = Engine(s.ctx())
-    finals = [c.obj for f in s.frames() for c in eng.step(f) if c.type == "final"]
-    keys = [f.incident.key for f in finals]
-    assert len(keys) == len(set(keys)) == 2, [(f.incident.start_ms, f.incident.end_ms, f.cause.rule) for f in finals]
+    its cause was already final, and the same incident was finalized twice. A local drop now settles only after the
+    120 s merge window, and a final incident is frozen."""
+    def finals(gap_s):
+        s = Scenario.default(500).fail(30, 40, probes={"gateway"}).internet_down(30, 40) \
+            .fail(30, 40, pairs={"dns_router:192.0.2.1:53/udp"}).internet_down(40 + gap_s, 50 + gap_s)
+        eng = Engine(s.ctx())
+        return [c.obj for f in s.frames() for c in eng.step(f) if c.type == "final"]
+    joined = finals(100)                       # inside the 120 s window, after the 80 s settle: still one drop
+    assert len(joined) == 1 and texts.ROUTER_RESTART in joined[0].incident.chain
+    apart = finals(200)                        # past the window: two drops, each finalized once
+    keys = [f.incident.key for f in apart]
+    assert len(keys) == len(set(keys)) == 2, [(f.incident.start_ms, f.incident.end_ms, f.cause.rule) for f in apart]
