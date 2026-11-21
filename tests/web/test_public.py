@@ -69,3 +69,12 @@ def test_event_details_by_allowlist():
 def test_mask_text():
     t = mask_text("router 192.168.0.1, isp 211.234.10.11:53, me 203.0.113.7, dns 1.1.1.1, if wlan0, v6 2001:db8::1")
     assert t == "router x.x.x.1, isp hidden, me hidden, dns 1.1.1.1, if (interface), v6 hidden"
+
+
+
+def test_line_hb_and_tcp_pairs_hide_reflector_and_unknown_hosts():
+    from whydrop.web.public import mask_pair
+    assert mask_pair("line_hb:203.0.113.50:48100/udp") == "line_hb:hidden"
+    assert mask_pair("tcp:1.1.1.1:443/tcp") == "tcp:1.1.1.1:443/tcp"
+    assert mask_pair("tcp:203.0.113.50:443/tcp") == "tcp:hidden:443/tcp"
+    assert mask_pair("stun:reflector.example.net:3478/udp") == "stun:hidden:3478/udp"

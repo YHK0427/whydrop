@@ -32,9 +32,11 @@ def pick_step(from_ms: int, to_ms: int, step: int | None) -> int:
     return next((s for s in STEPS if span / s <= MAX_POINTS), STEPS[-1])
 
 
-def samples(db, from_ms: int, to_ms: int, step: int | None, probe: str | None = None) -> dict:
+def samples(db, from_ms: int, to_ms: int, step: int | None, probe: str | None = None, now_ms: int | None = None) -> dict:
+    import time
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     step = pick_step(from_ms, to_ms, step)
-    table = "samples_1s" if to_ms - from_ms <= ONE_S_KEPT_MS and step < 60 else "samples_1m"
+    table = "samples_1s" if from_ms > now_ms - ONE_S_KEPT_MS and step < 60 else "samples_1m"  # 1 s rows live 7 days
     if table == "samples_1m":
         step = max(step, 60)
     where, params = "ts_ms >= ? AND ts_ms < ?", [from_ms, to_ms]
@@ -43,7 +45,8 @@ def samples(db, from_ms: int, to_ms: int, step: int | None, probe: str | None = 
         params.append(probe)
     sql = (f"SELECT (ts_ms / {step * 1000}) * {step * 1000} AS ts_ms, probe, pair, SUM(sent) sent, SUM(ok) ok, "
            "SUM(lost) lost, SUM(lost_up) lost_up, SUM(lost_down) lost_down, SUM(lost_dir_unknown) lost_dir_unknown, "
-           "SUM(late) late, SUM(local_fail) local_fail, MIN(rtt_min) rtt_min, AVG(rtt_avg) rtt_avg, "
+           "SUM(late) late, SUM(local_fail) local_fail, MIN(rtt_min) rtt_min, "
+           "SUM(rtt_avg * ok) / NULLIF(SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END), 0) rtt_avg, "
            f"MAX(rtt_max) rtt_max, MAX(rtt_p95) rtt_p95 FROM {table} WHERE {where} "
            "GROUP BY 1, probe, pair ORDER BY 1")
     return {"step_s": step, "table": table, "rows": rows(db, sql, params)}
@@ -92,6 +95,10 @@ def availability(db, from_ms: int, to_ms: int) -> dict:
 
 
 def add_annotation(db, start_ms: int, end_ms: int | None, label: str, note: str | None) -> int:
+    if db is None or not Path(db).exists():
+        raise FileNotFoundError("no database yet")
+    if note is not None and not isinstance(note, str):
+        raise ValueError("note must be text")
     if label not in LABELS:
         raise ValueError("label must be reproduced, injected or user-test")
     if end_ms is not None and end_ms < start_ms:

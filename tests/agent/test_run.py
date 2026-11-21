@@ -446,3 +446,21 @@ def test_alert_sent_for_finalized_drop_through_the_agent(fakes, monkeypatch):
         await asyncio.wait_for(task, 10)
     asyncio.run(go())
     assert [m["drop"]["cause"] for m in sent] == ["R2"]
+
+
+
+def test_dashboard_port_in_use_does_not_stop_recording(fakes, caplog):
+    import socket
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 0))
+    busy.listen()
+    port = busy.getsockname()[1]
+    cfg, _, _ = fakes
+    from dataclasses import replace
+    cfg = replace(cfg, web=replace(cfg.web, bind=f"127.0.0.1:{port}"))
+    try:
+        run_for(cfg, 2.0)
+    finally:
+        busy.close()
+    assert db(cfg, "select count(*) from samples_1s where probe = 'gateway'")[0][0] >= 1
+    assert "dashboard off: can't listen" in caplog.text  # refused cleanly, not stolen (Windows SO_REUSEADDR) or exit()

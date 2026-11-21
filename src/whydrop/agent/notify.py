@@ -48,7 +48,8 @@ def _post(url: str, body: str, headers: dict) -> None:
 
 
 class Notifier:
-    def __init__(self, cfg_notify, now_ms):
+    def __init__(self, cfg_notify, now_ms, on_queue=None):
+        self.on_queue = on_queue or (lambda q: None)   # persist after every change
         self.url = (cfg_notify or {}).get("webhook_url")
         self.fmt = (cfg_notify or {}).get("format", "json")
         self.kuma = (cfg_notify or {}).get("kuma_push_url")
@@ -64,7 +65,7 @@ class Notifier:
         try:
             await asyncio.to_thread(_post, self.url, body, headers)
             return True
-        except (OSError, ValueError) as e:     # URLError/HTTPError are OSErrors; never log the URL (it may hold a token)
+        except Exception as e:   # OSError, http.client errors, …: log the type only (the URL may hold a token)
             log.warning("alert not delivered (%s); will retry", type(e).__name__)
             return False
 
@@ -75,6 +76,7 @@ class Notifier:
         if not await self._send(data["row"]):
             self.queue.append({"row": data["row"], "first_ms": self.now_ms(), "next_ms": self.now_ms() + BACKOFF_S[0] * 1000,
                                "tries": 1})
+            self.on_queue(self.queue)
 
     async def retry(self) -> None:
         now, keep = self.now_ms(), []
@@ -88,18 +90,21 @@ class Notifier:
                 item["tries"] += 1
                 item["next_ms"] = now + BACKOFF_S[min(item["tries"] - 1, len(BACKOFF_S) - 1)] * 1000
                 keep.append(item)
+        changed = len(keep) != len(self.queue)
         self.queue = keep
+        if changed:
+            self.on_queue(self.queue)
 
     async def kuma_push(self) -> None:
         """Optional Uptime Kuma push monitor: a heartbeat while the agent runs."""
         if self.kuma:
             try:
                 await asyncio.to_thread(lambda: urllib.request.urlopen(self.kuma, timeout=TIMEOUT_S).close())
-            except (OSError, ValueError):
+            except Exception:
                 pass
 
     async def run(self, bus, stop: asyncio.Event) -> None:
-        q = bus.subscribe()
+        q = bus.subscribe({"incident"})   # samples and events can't push a finalized drop out
         try:
             while not stop.is_set():
                 try:

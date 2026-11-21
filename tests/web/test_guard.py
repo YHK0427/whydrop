@@ -97,3 +97,21 @@ def test_resolve_token(tmp_path):
     assert t1 and len(t1) >= 24 and resolve_token("0.0.0.0", {}, tmp_path) == t1   # kept in the data dir
     if sys.platform != "win32":
         assert stat.S_IMODE(os.stat(tmp_path / "ui-token").st_mode) == 0o600
+
+
+
+def test_non_ascii_or_empty_bearer_is_401_not_500():
+    c = client()
+    assert c.get("/api/status", headers={"Authorization": "Bearer é".encode("utf-8")}).status_code == 401
+    assert c.get("/api/status", headers={"Authorization": "Bearer "}).status_code == 401
+
+
+def test_empty_token_file_is_replaced(tmp_path):
+    (tmp_path / "ui-token").write_text("", encoding="utf-8")
+    t = resolve_token("0.0.0.0", {}, tmp_path)
+    assert len(t) >= 16 and (tmp_path / "ui-token").read_text(encoding="utf-8") == t
+
+
+def test_short_env_token_refused(tmp_path):
+    with pytest.raises(ValueError):
+        resolve_token("0.0.0.0", {"WHYDROP_UI_TOKEN": "short"}, tmp_path)

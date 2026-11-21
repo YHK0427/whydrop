@@ -523,7 +523,9 @@ class Agent:
     # ---------- alerts ----------
     async def start_notify(self) -> None:
         from whydrop.agent.notify import Notifier
-        self.notifier = Notifier(dict(self.cfg.notify), self.now)
+        self.notifier = Notifier(dict(self.cfg.notify), self.now,
+                                 on_queue=lambda q: self.spawn(self.store.meta_set("notify_queue", json.dumps(q)),
+                                                               "alert queue"))
         if not (self.notifier.enabled or self.notifier.kuma):
             return
         self.notifier.queue = json.loads(await self.store.meta_get("notify_queue") or "[]")  # survives restarts
@@ -590,15 +592,38 @@ class Agent:
             return
         host, _, port = self.cfg.web.bind.rpartition(":")
         host = host.strip("[]") or "127.0.0.1"
-        token = resolve_token(host, os.environ, self.cfg.db_path.parent)
+        try:
+            token = resolve_token(host, os.environ, self.cfg.db_path.parent)
+        except ValueError as e:
+            log.error("dashboard off: %s", e)
+            return
         app = create_app(self.cfg.db_path, self.bus, token=token, allowed_hosts=allowed_hosts(host, list(self.cfg.web.allowed_hosts)),
                          public_default=self.cfg.web.public_view_default, status=self.status,
                          nat_run=self.web_nat_run if self.precision else None, nat_state=lambda: self._nat_progress)
-        server = uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), log_level="warning", access_log=False,
+        import socket as _socket
+        try:  # bind ourselves: uvicorn's own bind failure calls sys.exit, which would take the agent down
+            fam = _socket.AF_INET6 if ":" in host else _socket.AF_INET
+            sock = _socket.socket(fam, _socket.SOCK_STREAM)
+            if sys.platform != "win32":
+                sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            sock.bind((host, int(port)))
+        except (OSError, ValueError) as e:
+            log.error("dashboard off: can't listen on %s:%s (%s); recording continues", host, port,
+                      getattr(e, "strerror", None) or e)
+            return
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False,
                                                lifespan="off", ws="websockets-sansio"))
         server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
         self._web = server
-        self._web_task = self.spawn(server.serve(), "dashboard")
+
+        async def serve():
+            try:
+                await server.serve(sockets=[sock])
+            except SystemExit:
+                log.error("dashboard stopped unexpectedly; recording continues")
+            finally:
+                sock.close()
+        self._web_task = self.spawn(serve(), "dashboard")
         if host in LOOPBACK:
             log.info("dashboard: http://%s:%s/", host, port)
         else:  # the Jupyter way: the one place the token is shown

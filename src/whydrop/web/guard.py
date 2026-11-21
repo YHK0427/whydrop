@@ -17,20 +17,33 @@ SECURITY_HEADERS = [
 ]
 
 
+MIN_TOKEN = 16
+
+
 def resolve_token(bind_host: str, env, data_dir: Path) -> str | None:
-    """No token on a loopback bind; otherwise WHYDROP_UI_TOKEN, or one generated once and kept (mode 600)."""
-    if env.get("WHYDROP_UI_TOKEN"):
-        return env["WHYDROP_UI_TOKEN"]
+    """No token on a loopback bind; otherwise WHYDROP_UI_TOKEN (≥ 16 characters), or one generated once and kept
+    (mode 600, written atomically)."""
+    given = (env.get("WHYDROP_UI_TOKEN") or "").strip()
+    if len(given) >= MIN_TOKEN:
+        return given
+    if given:
+        raise ValueError(f"WHYDROP_UI_TOKEN must be at least {MIN_TOKEN} characters")
     if bind_host in LOOPBACK:
         return None
     path = Path(data_dir) / "ui-token"
-    if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+    try:
+        kept = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        kept = ""
+    if len(kept) >= MIN_TOKEN:
+        return kept
     token = secrets.token_urlsafe(24)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    tmp = path.with_name(f".ui-token.{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(token)
+    os.replace(tmp, path)          # never a half-written (empty) token on disk
     return token
 
 
@@ -64,7 +77,11 @@ class Guard:
         self.app, self.token = app, token
 
     def _ok(self, presented: str | None) -> bool:
-        return self.token is None or (presented is not None and hmac.compare_digest(presented, self.token))
+        if self.token is None:
+            return True
+        if not presented:
+            return False
+        return hmac.compare_digest(presented.encode("utf-8", "replace"), self.token.encode("utf-8"))  # bytes: any input
 
     async def _deny(self, send, status: int, msg: str) -> None:
         body = json.dumps({"error": msg}).encode()

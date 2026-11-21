@@ -1,5 +1,6 @@
 """The FastAPI app: API routes, /ws and the static dashboard, behind the guards (spec §8)."""
 import asyncio
+import sqlite3
 import time
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from whydrop.web import export as X
 from whydrop.web import queries as Q
 from whydrop.web.bus import Bus
 from whydrop.web.guard import Guard
+from whydrop.web.public import mask_text
 from whydrop.web.public import public as to_public
 
 STATIC = Path(__file__).with_name("static")
@@ -103,7 +105,7 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         text = await run(X.summary, db_path, iid, request.query_params.get("lang", "en"))
         if text is None:
             raise HTTPException(404, "no such drop")
-        return PlainTextResponse(text)
+        return PlainTextResponse(mask_text(text) if is_public(request) else text)
 
     @app.get("/api/conditions")
     async def get_conditions(request: Request):
@@ -145,7 +147,7 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     @app.get("/api/gaps")
     async def get_gaps(request: Request):
         frm, to = span(request, 30 * DAY_MS)
-        return await run(Q.gaps, db_path, frm, to)
+        return out(request, await run(Q.gaps, db_path, frm, to), "gap")
 
     @app.get("/api/annotations")
     async def get_annotations(request: Request):
@@ -160,10 +162,15 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             body = await request.json()
             start = int(body["start_ms"])
             end = int(body["end_ms"]) if body.get("end_ms") is not None else None
+            if len(await request.body()) > 4096:
+                raise ValueError("annotation too large")
             rid = await run(Q.add_annotation, db_path, start, end, str(body.get("label")), body.get("note"))
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as e:
             raise HTTPException(400, str(e) or "bad annotation")
-        bus.publish("annotation", {"id": rid, "start_ms": start, "end_ms": end, "label": body.get("label")})
+        except (FileNotFoundError, sqlite3.Error):
+            raise HTTPException(503, "the database is not available right now")
+        bus.publish("annotation", {"op": "created",
+                                   "row": {"id": rid, "start_ms": start, "end_ms": end, "label": body.get("label")}})
         return {"id": rid}
 
     @app.get("/api/packets")
@@ -182,8 +189,8 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         if name not in X.TABLES or fmt not in ("csv", "json"):
             raise HTTPException(404, "export incidents|conditions|samples_1m|events as .csv or .json")
         frm, to = span(request, 30 * DAY_MS)
-        rows = await run(X.table_rows, db_path, name, frm, to)
-        body, ctype = X.render(name, rows, fmt, is_public(request), _now())
+        pub, now = is_public(request), _now()
+        body, ctype = await run(lambda: X.render(name, X.table_rows(db_path, name, frm, to), fmt, pub, now))  # off the loop
         return Response(body, media_type=ctype,
                         headers={"content-disposition": f'attachment; filename="whydrop-{name}.{fmt}"'})
 

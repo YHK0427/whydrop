@@ -57,7 +57,12 @@ def mask_pair(pair: str | None) -> str | None:
     if cls == "dns_router":
         addr, _, tail = rest.partition(":")
         return f"dns_router:{mask_text(addr)}:{tail}" if tail else f"dns_router:{mask_text(addr)}"
-    return pair if cls in ("dns_public", "line_hb", "stun", "tcp") else cls
+    if cls == "line_hb":
+        return "line_hb:hidden"     # its address can be the reflector's
+    if cls in ("dns_public", "stun", "tcp"):
+        addr, _, tail = rest.partition(":")
+        return f"{cls}:{mask_text(addr)}:{tail}" if tail else f"{cls}:{mask_text(addr)}"
+    return cls
 
 
 def _rel(ms, now_ms):
@@ -81,7 +86,8 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
                 "evidence": evidence}
     if kind == "event":
         allowed = EVENT_DETAIL.get(r.get("kind"), set())
-        d = {k: v for k, v in _j(r.get("detail_json", r.get("detail"))).items() if k in allowed}
+        d = {k: (mask_text(v) if isinstance(v, str) else v)
+             for k, v in _j(r.get("detail_json", r.get("detail"))).items() if k in allowed}
         return {"kind": r.get("kind"), "t_s": _rel(r.get("ts_ms"), now_ms), "pair": mask_pair(r.get("pair")), "detail": d}
     if kind == "segment":
         d = _j(r.get("detail_json", r.get("detail")))
@@ -107,6 +113,8 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
                 "verdict": res.get("verdict")}
     if kind == "nat":
         return {k: r[k] for k in ("proto", "delay_s", "alive") if k in r}
+    if kind == "gap":
+        return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms)}
     if kind == "annotation":
         return {"start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms), "label": r.get("label")}
     return {}
