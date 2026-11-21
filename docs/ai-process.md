@@ -54,7 +54,15 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Reviews | Two batch reviews and one whole-branch review by the most capable model, then a re-review of its fixes. Real faults found before any deployment, among them: after one ICMP error a Windows UDP socket in asyncio never receives again, so a reflector restart would have silently ended all precision measurements (the reviewer reproduced it on three Python versions); nat-test opened more TCP handshakes at once than the reflector's own per-IP limit allows; a laptop waking from sleep would have recorded hours-long "TCP stalls"; two suspend tests could not fail and were rewritten with negative controls | Merge after review |
 | Tests that prove themselves | For each fix the agent removed the fix again and checked that its new test fails, before committing | — |
 
-Counts so far: 24 review agents, roughly 350 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-21 — Plan 4 built: the analysis
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Test-first build | 8 tasks: per-second frames, segment state machines (this device, Wi-Fi/cable, router, line, DNS) with the line quorum and the lossy-period gate, conditions and rough patches, drops with merging and point events, likely causes with an 80 s settle, live wiring in the agent, `whydrop replay` and `whydrop annotate`. A small scenario language builds synthetic seconds; all 22 scenarios of the spec pass through the full engine. 453 tests | — |
+| Reviews | One batch review, one whole-branch review by the most capable model, and two rounds of re-review on the fixes. Faults found before deployment, among them: a Wi-Fi probe that could not read its interface counted as "Wi-Fi down", which would have opened a drop that never ends and switched off line detection; a drop open when the laptop went to sleep would have lasted the whole night; Windows timer steps (15.6 ms) would have marked the host as permanently busy; a reflector outage would have been reported as a lossy ISP line; one fix crashed the agent at startup when `netsh` timed out | Merge after review |
+| A CI failure that pointed at a real bug | The Linux CI runner read its own network interface during a test and produced a false "cable problem". The test was fixed, and the reviewer then showed the same mistake would happen on real machines, which led to the fix above | — |
+
+Counts so far: 26 review agents, roughly 410 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.
