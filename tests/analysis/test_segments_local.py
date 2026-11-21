@@ -39,8 +39,15 @@ def test_link_flap_wired():
 def test_lan_two_misses():
     _, ch = run(Scenario.default(30).fail(10, 11, probes={"gateway"}))
     assert downs(ch, "lan") == []
-    _, ch = run(Scenario.default(30).fail(10, 14, probes={"gateway"}))
+    _, ch = run(Scenario.default(30).fail(10, 14, probes={"gateway"}).internet_down(10, 14))
     assert downs(ch, "lan") == [(10, "down"), (14, "up")]
+
+
+def test_gateway_timeouts_while_the_internet_answers_are_not_a_router_drop():
+    """Measured on a Wi-Fi home server: the gateway check timed out twice while line probes still answered
+    through the router (600 ms RTT) — a latency spike, not a router outage."""
+    _, ch = run(Scenario.default(30).fail(10, 14, probes={"gateway"}))
+    assert downs(ch, "lan") == []
 
 
 def test_lan_unobservable():
