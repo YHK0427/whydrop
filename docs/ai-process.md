@@ -46,7 +46,15 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Live runs | Ran the agent on the laptop against the real internet several times. The self-check excluded exactly the targets measured as blocked by hand on 11-17. The live runs found three bugs the tests had missed, the most interesting being Cloudflare's real CHAOS answer (`icn06`, not the documented `ICN`), which made the interception check cry wolf | — |
 | A wrong claim, corrected | The agent reported Linux CI as green when it had not checked it; one Windows-only test assumption had kept CI red for several pushes. The human spotted it. The test was fixed, the claim corrected in the log and to the reviewer, and the agent now waits for each CI run before reporting it | Caught the red CI |
 
-Counts so far: 21 review agents, roughly 300 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-21 — Plan 3 built: precision mode
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Test-first build | 7 tasks: precision switch, udp_stream (10 pps with send-time buckets and up/down direction), a kernel `TCP_INFO` reader, the hot and idle TCP canaries, `whydrop nat-test`, and wiring with a measured traffic budget (≈ 18.5 kbps of the 20 kbps allowed). Every protocol test runs against the real reflector over loopback, through proxies that stall, reset or forget connections like a NAT does. 329 tests | Build precision mode before the cloud account exists |
+| Reviews | Two batch reviews and one whole-branch review by the most capable model, then a re-review of its fixes. Real faults found before any deployment, among them: after one ICMP error a Windows UDP socket in asyncio never receives again, so a reflector restart would have silently ended all precision measurements (the reviewer reproduced it on three Python versions); nat-test opened more TCP handshakes at once than the reflector's own per-IP limit allows; a laptop waking from sleep would have recorded hours-long "TCP stalls"; two suspend tests could not fail and were rewritten with negative controls | Merge after review |
+| Tests that prove themselves | For each fix the agent removed the fix again and checked that its new test fails, before committing | — |
+
+Counts so far: 24 review agents, roughly 350 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.
