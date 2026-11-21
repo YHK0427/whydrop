@@ -72,6 +72,7 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
     elif out.exists():
         out.rmdir()
     shutil.copytree(STATIC, out)
+    (out / "static.json").write_text(json.dumps({"static": True, "partial": True}), encoding="utf-8")  # ours, even half-done
     data = out / "data"
     data.mkdir()
     written = []

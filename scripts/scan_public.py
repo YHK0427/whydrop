@@ -13,7 +13,8 @@ ALLOWED_NETS = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/
                                                   "0.0.0.0/32", "2001:db8::/32", "::1/128", "::/128")]
 V4 = re.compile(r"(?<![\w.])(\d{1,3}(?:\.\d{1,3}){3})(?!\w)(?!\.\d)")   # a trailing full stop still ends the address
 V6 = re.compile(r"(?<![\w:.])((?:[0-9a-fA-F]{1,4}:){1,7}(?::[0-9a-fA-F]{1,4}){0,7}|(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}"
-                r"|::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})(?![\w:])")
+                r"|(?:[0-9a-fA-F]{1,4}:){1,7}:|::(?:[0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})(?![\w:.])")   # prefixes (fe80::) too
+ESCAPES = re.compile(r'\\[ntr"/\\]')   # JSON/JS string escapes: after a literal \n an address still starts
 
 
 def _v4(text: str):
@@ -34,6 +35,7 @@ def _v6(text: str):
 
 
 def bad_addresses(text: str) -> set[str]:
+    text = ESCAPES.sub(" ", text)
     out = set()
     for norm, raw in (*_v4(text), *_v6(text)):
         a = ipaddress.ip_address(norm)

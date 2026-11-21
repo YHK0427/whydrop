@@ -70,7 +70,21 @@ This log is kept **while the work happens**, not reconstructed afterwards. A cod
 | Checks in a real browser | Screenshots of every screen in both themes, both languages and two widths reviewed by eye; axe-core with zero serious violations; a full keyboard path; no sideways scroll on a 360 px phone in Korean; one run under the real Content-Security-Policy with a token | — |
 | Reviews | One batch review, one whole-branch review by the most capable model and two re-reviews. The reviewer measured, not guessed: chart requests stalled the agent's loop for 1.2–3 s and added 60–90 MB of memory (fixed: columnar charts, encoding off the loop, streamed exports; re-measured at under 10 ms and a few kB). Also caught: the reflector's address leaking through one probe's name in public view, a busy port letting the web server exit the whole agent, copy-to-clipboard failing on a LAN address, exports dying mid-stream on one table | Merge after review |
 
-Counts so far: 28 review agents, roughly 485 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
+## 2026-11-22 — The first day of real data
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Reading its own output | Pulled a copy of the database from the home server after ~10 h and replayed it: 32 drops, most of them 2–7 s "router" drops. In those seconds the router check (a TCP probe to a closed port) had timed out twice while line probes were answering *through the same router* — Wi-Fi power save and 500–800 ms spikes, not a dead router | — |
+| Fix | A router drop now also needs that nothing answered from the internet through the router in that second; a new test covers the case. Replay of the same 10 h: 32 → 14 drops (the rest: four UDP-DNS episodes and a real Wi-Fi trouble window) | Merge after the tests and CI |
+
+## 2026-11-22 — Plan 6: release work
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Build | A Wireshark dissector for both protocols (checked with tshark against a capture built byte by byte); `whydrop export-static` for a read-only public demo; CI on Windows, a dissector job and image smoke tests; release images for three architectures with SBOM and provenance; a manual Pages workflow behind an address scanner; the public docs in English and Korean | Publishing the demo and tagging v0.1.0 wait for the human's review |
+| Reviews | One code review, one documentation-accuracy review (every claim checked against the source), and a re-review of the fixes. Caught: `export-static` would have deleted whatever directory `--out` pointed at; demo pages exported days after recording came out empty and chart times were absolute; the address scanner missed an address at the end of a sentence and passed when its directory didn't exist; the leak test could not fail (its data held no private values — once seeded, it found an interface name leaking); the docs described rule details, a disk-full banner and example verdict sentences that the code doesn't have; compose never passed the reflector settings to the container, so precision mode could not be turned on from the README's instructions | Merge after review |
+
+Counts so far: 31 review agents, roughly 515 findings. Each adopted finding was either checked by measurement or source, or adopted as a design decision (not separately verified). Rejected or corrected agent output: one reviewer claimed a competitor had "refused" UDP support; reading the actual issue threads showed otherwise, so the claim was not used.
 
 Notable catches from the reviews and measurements:
 - The first design would have excluded *every* target if the agent started during an outage.

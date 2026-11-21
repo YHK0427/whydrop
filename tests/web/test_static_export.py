@@ -91,3 +91,12 @@ def test_export_static_refuses_a_directory_it_did_not_write(tmp_path):
     site = tmp_path / "site"
     export_static(tmp_path / "w.db", site, None, st["now_ms"])
     export_static(tmp_path / "w.db", site, None, st["now_ms"])                 # its own earlier output: replaced
+
+
+def test_cli_export_static_refuses_cleanly(tmp_path, capsys):
+    from whydrop.cli import main
+    build(tmp_path)
+    f = tmp_path / "a_file"
+    f.write_text("keep")
+    assert main(["export-static", str(tmp_path / "w.db"), "--out", str(f)]) == 2
+    assert f.read_text() == "keep" and "whydrop:" in capsys.readouterr().err

@@ -205,6 +205,9 @@ def _export_static(args: argparse.Namespace) -> int:
     except FileExistsError as e:
         print(f"whydrop: {e}; choose an empty or new --out", file=sys.stderr)
         return 2
+    except OSError as e:   # --out is a file, a link, unwritable…
+        print(f"whydrop: can't write {args.out}: {e.strerror or e}", file=sys.stderr)
+        return 2
     print(f"wrote {m['files']} data files to {args.out} (public view, read-only)")
     return 0
 
