@@ -117,7 +117,8 @@ async def detect_env(cfg) -> EnvInfo:
         link = "wifi" if Path(f"/sys/class/net/{iface}/wireless").exists() else "wired"
     elif sys.platform == "win32":
         from whydrop.agent.probes.wifi import WindowsWifi
-        link = "wifi" if (await WindowsWifi().snapshot()).up else "unknown"
+        snap = await WindowsWifi().snapshot()  # None when netsh failed: we don't know
+        link = "wifi" if snap is not None and snap.up else "unknown"
     else:
         link = "unknown"
     isp = cfg.isp_dns or isp_dns_from(_read_resolvers(), gw)

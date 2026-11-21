@@ -105,15 +105,24 @@ class Segments:
                 out.append(SegmentChange(t, seg, change))
                 if change == "up" and seg != "host_net":
                     self._local_up_ms = max(self._local_up_ms, t)
-        if any(e.kind == "suspend" for e in frame.events):
-            for held in self.local.values():
+        if any(e.kind == "suspend" for e in frame.events):  # the host slept: whatever was down is no longer known
+            woke = {"host_slept": True}
+            for seg, held in self.local.items():
+                if held.state == "down":
+                    out.append(SegmentChange(frame.t_ms, seg, "up", woke))
                 held.state, held._run = ("unknown" if held.state == "down" else held.state), None
             if self._line == "down":
+                if not self._gated:
+                    out.append(SegmentChange(frame.t_ms, "line", "up", woke))
                 self._line, self._gated, self._first_ok = "up", False, None
             self._lan_misses.clear()
-            self._lan = "up" if self._lan == "down" else self._lan
+            if self._lan == "down":
+                out.append(SegmentChange(frame.t_ms, "lan", "up", woke))
+                self._lan = "up"
             for c in self._dns:
-                self._dns[c] = "up" if self._dns[c] == "down" else self._dns[c]
+                if self._dns[c] == "down":
+                    out.append(SegmentChange(frame.t_ms, c, "up", woke))
+                    self._dns[c] = "up"
         lan_before = self._lan
         out += self._step_lan(frame)
         if lan_before == "down" and self._lan == "up":

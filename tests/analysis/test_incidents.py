@@ -140,3 +140,17 @@ def test_incident_open_across_sleep_ends_when_the_sleep_began():
     _, ch = run(s)
     [i] = closed(ch)
     assert sec(i.end_ms) == 55 and "host_slept" in i.tags and "long_outage" not in i.tags
+
+
+def test_wifi_outage_with_probe_removed_stays_one_incident():
+    """netwatch drops the Wi-Fi probe once the route goes; host_net keeps the incident open until real recovery."""
+    s = Scenario.default(300).fail(30, 150, probes={"wifi"}).fail(32, 150, probes={"host_net"})
+    frames = s.frames()
+    for f in frames[40:150]:
+        f.samples.pop(("wifi", "wifi"), None)
+    c = s.ctx()
+    seg, cond, inc = Segments(c), Conditions(c), Incidents(c)
+    out = [x for f in frames for x in inc.step(f, seg.step(f), cond.step(f, seg), seg)]
+    ids = {id(x.incident) for x in out if x.op == "close"}
+    [last] = [x.incident for x in out if x.op == "close"][-1:]
+    assert len(ids) == 1 and sec(last.end_ms) >= 150
