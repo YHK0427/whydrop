@@ -58,11 +58,26 @@ class _Canary:
         self.param_s = param_s
         self.state = "down"
         self._connected_before = False
+        self._suspended_at: float | None = None
+        self.err_hold_s = 1.5
+        self._held: set[asyncio.Task] = set()
         self._refusal_reported = False
 
-    def emit(self, kind: str, **detail) -> None:
+    def emit(self, kind: str, ts_ms: int | None = None, **detail) -> None:
         detail.setdefault("canary", self.role.name.lower())
-        self.on_event(Event(kind, self.tb.now_ms(), "reflector", detail))
+        self.on_event(Event(kind, self.tb.now_ms() if ts_ms is None else ts_ms, "reflector", detail))
+
+    def emit_conn_error(self, kind: str, **detail) -> None:
+        """rst / kernel_timeout wait a moment: after a host sleep the reset comes before the suspend report."""
+        at, ts = self.mono(), self.tb.now_ms()
+
+        async def later():
+            await asyncio.sleep(self.err_hold_s)
+            if self._suspended_at is None or self._suspended_at < at - 2:
+                self.emit(kind, ts, **detail)
+        t = asyncio.ensure_future(later())
+        self._held.add(t)
+        t.add_done_callback(self._held.discard)
 
     async def _pause(self, seconds: float, stop: asyncio.Event) -> None:
         sleeper = asyncio.ensure_future(self.sleep(seconds))
@@ -133,7 +148,7 @@ class _Canary:
         except (OSError, asyncio.IncompleteReadError, asyncio.TimeoutError, WtError) as e:
             kind = classify_conn_error(e)
             if kind in ("rst", "kernel_timeout"):
-                self.emit(kind)
+                self.emit_conn_error(kind)
             return kind
         except Exception:
             log.exception("%s canary: unexpected error", self.role.name.lower())
@@ -160,6 +175,7 @@ class HotCanary(_Canary):
     def notify_suspend(self) -> None:
         """The host slept: the connection is stale, and what happens to it now is not network evidence."""
         self._suspend = True
+        self._suspended_at = self.mono()
 
     def _check_middlebox(self) -> None:
         """A TCP answer much faster than UDP over the same path means something nearer ends the TCP connection."""
@@ -205,6 +221,8 @@ class HotCanary(_Canary):
                     st["stall_at"] = None
                     self.state = "ok"
 
+        self._suspend = False  # a report from before this session is about the old one
+
         async def watchdog():
             last_run = self.mono()
             while True:
@@ -213,8 +231,9 @@ class HotCanary(_Canary):
                     self._suspend = False
                     st["stall_at"] = None  # no stall/rst evidence from a host that was asleep
                     return "suspended"
-                if self.mono() - last_run > self.stall_s:  # we ourselves didn't run (loop stall, sleep)
-                    st["last_ack"] = self.mono()
+                if self.mono() - last_run > self.stall_s:  # we ourselves didn't run (sleep, long loop stall)
+                    st["stall_at"] = None
+                    return "suspended"  # start clean rather than judge this connection
                 last_run = self.mono()
                 quiet = self.mono() - st["last_ack"]
                 if st["stall_at"] is None and sent and quiet > self.stall_s:
@@ -246,7 +265,7 @@ class HotCanary(_Canary):
             if exc is not None:
                 kind = classify_conn_error(exc)
                 if kind in ("rst", "kernel_timeout"):
-                    self.emit(kind)
+                    self.emit_conn_error(kind)
                 return kind
             return finished.result()
         finally:
@@ -313,7 +332,7 @@ class IdleCanary(_Canary):
             if exc is not None:
                 kind = classify_conn_error(exc)
                 if kind in ("rst", "kernel_timeout"):
-                    self.emit(kind, canary="idle")
+                    self.emit_conn_error(kind)
                 return kind
             return finished.result()
         finally:

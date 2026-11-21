@@ -165,6 +165,10 @@ class UdpStream:
         self.last_echo_ms: int | None = None
         self._opened_at = 0.0
         self._last_echo_mono = 0.0
+        self._unsent = 0            # slots that never went out get keys < 0: they must not use up seqs
+        self._deaf = False          # Windows: an ICMP error stopped this socket's receives
+        self._win_next = -1e9
+        self._win_backoff = 1.0
         self._warned = -1e9
 
     @property
@@ -212,17 +216,26 @@ class UdpStream:
             if behind > 1 / self.pps:  # after a stall or a wake-up: skip the missed slots, never burst
                 k = int((time.monotonic() - start) * self.pps) + 1
             await asyncio.sleep(max(0.0, start + k / self.pps - time.monotonic()))
-            self._seq = (self._seq + 1) & 0xFFFFFFFF
             now = self.tb.now_ms()
             if self._transport is None or self._transport.is_closing():
-                self.book.sent(self._seq, now, local_fail=True)
+                self._unsent -= 1
+                self.book.sent(self._unsent, now, local_fail=True)  # outage totals count seqs: never burn one
                 if self._reconnect is None or self._reconnect.done():  # resolving can block: never on the send path
                     self._reconnect = asyncio.create_task(self._connect())
+                continue
+            if self._deaf and time.monotonic() >= self._win_next:
+                # reopen on a schedule (1 s, backing off to 30 s) so an outage doesn't churn NAT mappings
+                self._deaf = False
+                self._win_next = time.monotonic() + self._win_backoff
+                self._win_backoff = min(30.0, self._win_backoff * 2)
+                self.reopen()
                 continue
             quiet_since = max(self._opened_at, self._last_echo_mono)
             if time.monotonic() - quiet_since > SILENT_REOPEN_S:
                 self.reopen()
                 self._opened_at = time.monotonic()  # one reopen per silent period, not one per packet
+                continue
+            self._seq = (self._seq + 1) & 0xFFFFFFFF
             self.book.sent(self._seq, now)
             self._transport.sendto(wd.encode(WdPacket(WdType.PROBE, self.session_id, self._seq, time.perf_counter_ns()),
                                              self.secret))
@@ -240,6 +253,7 @@ class UdpStream:
         traffic.BYTES[PROBE] += traffic.IP_UDP + wd.WD_LEN
         self.last_echo_ms = self.tb.now_ms()
         self._last_echo_mono = time.monotonic()
+        self._win_backoff = 1.0
         if self._last_epoch is not None and p.epoch != self._last_epoch:
             self.on_event(Event("reflector_restart", self.tb.now_ms(), "reflector", {"epoch": p.epoch}))
         self._last_epoch = p.epoch
@@ -248,7 +262,7 @@ class UdpStream:
 
     def _on_error(self, exc: Exception) -> None:
         if sys.platform == "win32":
-            self.reopen()
+            self._deaf = True  # sends still work, so packets until the reopen count as plain loss
         if isinstance(exc, OSError) and classify_oserror(exc).get("local_fail") and self._seq in self.book.pending:
             self.book.pending[self._seq].local_fail = True
 

@@ -234,3 +234,15 @@ def test_echo_from_wrong_source_or_session_ignored():
     assert st.last_echo_ms is None
     st._on_datagram(good, ("127.0.0.1", 9))
     assert st.last_echo_ms is not None
+
+
+def test_unsent_slots_dont_use_up_seqs():
+    async def main():
+        st = UdpStream(("127.0.0.1", 9), S, _Sink(), pps=20)
+        st._connect = lambda: asyncio.sleep(10)     # never connects
+        await st.start()
+        await asyncio.sleep(0.5)
+        await st.stop()
+        return st
+    st = asyncio.run(main())
+    assert st._seq == 0 and st.book.pending and all(k < 0 and s.local_fail for k, s in st.book.pending.items())

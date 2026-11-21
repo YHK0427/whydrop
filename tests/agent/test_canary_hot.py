@@ -110,6 +110,7 @@ def test_rst_triggers_reconnect():
         p = Proxy(port)
         pport = await p.start()
         c = canary(pport, events, hb_s=0.1, retry_s=0.1)
+        c.err_hold_s = 0.3
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
         await asyncio.sleep(0.5)
@@ -268,3 +269,26 @@ def test_suspend_gives_no_stall_or_rst_evidence():
     c = asyncio.run(main())
     kinds = [e.kind for e in events]
     assert "stall" not in kinds and "rst" not in kinds and "reconnect" in kinds and c.state == "ok"
+
+
+def test_rst_before_the_suspend_report_is_dropped():
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        p = Proxy(port)
+        pport = await p.start()
+        c = canary(pport, events, hb_s=0.1, retry_s=0.1)
+        c.err_hold_s = 0.5
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(0.4)
+        p.reset_clients()          # the reflector dropped us while we slept: the RST arrives first…
+        await asyncio.sleep(0.2)
+        c.notify_suspend()         # …and job_tick reports the sleep a moment later
+        await asyncio.sleep(1.0)
+        stop.set()
+        await task
+        srv.close()
+    asyncio.run(main())
+    assert "rst" not in [e.kind for e in events]
