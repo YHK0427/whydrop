@@ -1,0 +1,13 @@
+.git
+.github
+.superpowers
+.venv
+.pytest_cache
+**/__pycache__
+tests
+docs
+whydrop-data
+whydrop-state
+*.db
+.env
+whydrop.toml

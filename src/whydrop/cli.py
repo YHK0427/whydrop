@@ -37,6 +37,35 @@ def _reflector(args: argparse.Namespace) -> int:
     return 0
 
 
+def _agent(args: argparse.Namespace) -> int:
+    from whydrop.agent.config import ConfigError, load_config
+    from whydrop.agent.run import VMRefused, run_agent
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    path = args.config or (Path("whydrop.toml") if Path("whydrop.toml").exists() else None)
+    try:
+        cfg = load_config(path, os.environ)
+    except ConfigError as e:
+        print(f"whydrop: {e}", file=sys.stderr)
+        return 2
+
+    async def run():
+        stop = asyncio.Event()
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+        await run_agent(cfg, stop=stop)
+
+    try:
+        asyncio.run(run())
+    except VMRefused as e:
+        print(f"whydrop: {e}", file=sys.stderr)
+        return 3
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="whydrop")
     parser.add_argument("--version", action="version", version=f"whydrop {__version__}")
@@ -46,11 +75,15 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--port", type=int, default=48100)
     r.add_argument("--state-dir", type=Path, default=Path("./whydrop-state"))
     r.add_argument("--enable-7500", action="store_true", help="allow the 7500 s TCP nat-test delay")
+    a = sub.add_parser("agent", help="record your connection (basic mode needs no secret)")
+    a.add_argument("--config", type=Path, default=None, help="TOML file (default: ./whydrop.toml if present)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as e:  # argparse exits for --version/--help/errors; main returns the code instead
         return e.code if isinstance(e.code, int) else 1
     if args.cmd == "reflector":
         return _reflector(args)
+    if args.cmd == "agent":
+        return _agent(args)
     parser.print_help()
     return 0
