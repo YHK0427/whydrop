@@ -359,6 +359,9 @@ def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_p
         ok = not (3000 <= t - t0["t"] < 9000)
         return Result("line_hb", f"line_hb:{slot.provider}", slot.provider, t, ok, 5.0 if ok else None)
     monkeypatch.setattr(runmod.line_hb, "probe", line_hb)
+    async def no_link():
+        return None
+    monkeypatch.setattr(runmod.Agent, "job_link_layer", lambda self: no_link())  # CI runners have a real /sys link
     run_for(cfg, 19)
     rows = db(cfg, "select start_ms, primary_cause, evidence_json, tags_json from incidents")
     assert len(rows) == 1 and rows[0][1] == "R2" and "likely" in json.loads(rows[0][2])["label"]
