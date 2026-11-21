@@ -35,5 +35,7 @@ class LinkTracker:
             events.append(Event("link_speed", now, detail={"from": self._speed, "to": speed}))
         self._changes = changes if changes is not None else self._changes
         self._speed = speed if speed and speed > 0 else self._speed
+        if carrier is None:
+            return None, events  # carrier unreadable (no such interface): no evidence, not "down"
         return Result("link", "link", None, now, carrier == 1, None,
                       detail={"speed": speed, "duplex": duplex}), events

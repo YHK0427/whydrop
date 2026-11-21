@@ -163,14 +163,20 @@ class HotCanary(_Canary):
     role = Role.HOT
 
     def __init__(self, reflector, secret, on_event, *, hb_s: float = 1.0, stall_s: float = 3.0,
-                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, udp_rtt=None, **kw):
+                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, udp_rtt=None, on_result=None, **kw):
         super().__init__(reflector, secret, on_event, **kw)
         self.hb_s, self.stall_s, self.reconnect_stall_s, self.tcp_info_s = hb_s, stall_s, reconnect_stall_s, tcp_info_s
         self._rtts: deque[float] = deque(maxlen=20)
         self.rtt_ms: float | None = None
         self.udp_rtt = udp_rtt          # () -> udp_stream RTT median, for the middlebox check
+        self.on_result = on_result      # Result per HB (ok, or lost after stall_s) for the analysis
         self._suspend = False
         self.middlebox = False
+
+    def _result(self, t_ms, ok: bool, rtt=None) -> None:
+        if self.on_result and t_ms is not None:
+            from whydrop.agent.results import Result
+            self.on_result(Result("canary", "reflector", None, t_ms, ok, rtt))
 
     def notify_suspend(self) -> None:
         """The host slept: the connection is stale, and what happens to it now is not network evidence."""
@@ -189,6 +195,7 @@ class HotCanary(_Canary):
 
     async def _session(self, reader, writer, stop) -> str:
         sent: dict[int, int] = {}
+        sent_ms: dict[int, int] = {}
         st = {"last_ack": self.mono(), "stall_at": None}
         sock = writer.get_extra_info("socket")
 
@@ -197,8 +204,11 @@ class HotCanary(_Canary):
             while True:
                 seq = (seq + 1) & 0xFFFFFFFF
                 sent[seq] = time.perf_counter_ns()
+                sent_ms[seq] = self.tb.now_ms()
                 if len(sent) > 64:
-                    sent.pop(next(iter(sent)))
+                    old = next(iter(sent))
+                    sent.pop(old)
+                    self._result(sent_ms.pop(old, None), False)
                 writer.write(encode_frame(Frame(FrameType.HB, 0, seq, sent[seq])))
                 traffic.BYTES["canary"] += traffic.TCP_SEG + 16
                 await writer.drain()
@@ -211,6 +221,8 @@ class HotCanary(_Canary):
                     continue
                 traffic.BYTES["canary"] += traffic.TCP_SEG + 16
                 t0 = sent.pop(f.seq, None)
+                self._result(sent_ms.pop(f.seq, None), t0 is not None,
+                             (time.perf_counter_ns() - t0) / 1e6 if t0 is not None else None)
                 if t0 is not None:
                     self._rtts.append((time.perf_counter_ns() - t0) / 1e6)
                     self.rtt_ms = sorted(self._rtts)[len(self._rtts) // 2]
@@ -236,6 +248,10 @@ class HotCanary(_Canary):
                     return "suspended"  # start clean rather than judge this connection
                 last_run = self.mono()
                 quiet = self.mono() - st["last_ack"]
+                cutoff = self.tb.now_ms() - int(self.stall_s * 1000)
+                for q in [q for q, t in sent_ms.items() if t < cutoff]:
+                    sent.pop(q, None)
+                    self._result(sent_ms.pop(q), False)
                 if st["stall_at"] is None and sent and quiet > self.stall_s:
                     st["stall_at"] = st["last_ack"]
                     self.state = "stall"

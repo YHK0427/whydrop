@@ -79,3 +79,26 @@ def test_mask_pair():
     from whydrop.agent.probes.targets import mask_pair
     assert mask_pair("dns_isp:198.51.100.53:53/udp") == "dns_isp:x.x.x.53:53/udp"
     assert mask_pair("dns_public:8.8.8.8:53/udp") == "dns_public:8.8.8.8:53/udp"
+
+
+def test_windows_netsh_failure_is_unknown_link(monkeypatch):
+    import asyncio
+
+    from whydrop.agent.config import load_config
+    from whydrop.agent.probes import wifi
+
+    async def route():
+        return ("192.0.2.1", "192.0.2.5")
+
+    async def none(*a, **k):
+        return None
+
+    async def no_netsh(self):
+        return None                                    # netsh timed out
+    monkeypatch.setattr(env.sys, "platform", "win32")
+    monkeypatch.setattr(env.host_net, "default_route", route)
+    monkeypatch.setattr(env.host_net, "source_address", lambda: "192.0.2.5")
+    monkeypatch.setattr(env, "_egress_iface", none)
+    monkeypatch.setattr(wifi.WindowsWifi, "snapshot", no_netsh)
+    info = asyncio.run(env.detect_env(load_config(None, {})))
+    assert info.link == "unknown"

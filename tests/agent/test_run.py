@@ -186,6 +186,14 @@ def test_route_appears_later_then_link_is_recorded(fakes, monkeypatch):
     envs.append(EnvInfo("eth0", "192.0.2.1", "wired", (), False, False, "eth0"))
     monkeypatch.setattr(runmod, "NETWATCH_EVERY_S", 0.3)
     monkeypatch.setattr(runmod.sys, "platform", "linux")
+
+    class FakeLink:  # this host has no /sys/class/net/eth0; an unreadable carrier now records nothing
+        def __init__(self, iface, now_ms):
+            self.now = now_ms
+
+        def probe(self):
+            return Result("link", "link", None, self.now(), True, None), []
+    monkeypatch.setattr(runmod.link, "LinkTracker", FakeLink)
     run_for(cfg, 2.0)
     assert ("link",) in db(cfg, "select distinct probe from samples_1s")
 
@@ -336,3 +344,54 @@ def test_wrong_secret_is_secret_mismatch(fakes, monkeypatch, tmp_path):
     cfg = precision_cfg(tmp_path, monkeypatch, asyncio.run(port()))
     run_with(cfg, 2.0, reflector_secret="z" * 40)
     assert "secret_mismatch" in [k for (k,) in db(cfg, "select kind from findings")]
+
+
+
+# ---------- live analysis (Plan 4) ----------
+def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_path):
+    from whydrop.analysis import constants as K
+    from whydrop.analysis.replay import replay
+    monkeypatch.setattr(runmod, "ANALYSIS_START_S", 0)
+    monkeypatch.setattr(K, "FINALIZE_LAG_MS", 6500)
+    cfg, _, _ = fakes
+    t0 = {}
+
+    async def resolve(self):
+        for s in self.by_kind("stun"):
+            self.resolved[s.addr] = "192.0.2.10"
+    monkeypatch.setattr(runmod.Targets, "resolve", resolve)
+
+    async def line_hb(slot, now_ms, **k):
+        t = now_ms()
+        t0.setdefault("t", t)
+        ok = not (3000 <= t - t0["t"] < 9000)
+        return Result("line_hb", f"line_hb:{slot.provider}", slot.provider, t, ok, 5.0 if ok else None)
+    monkeypatch.setattr(runmod.line_hb, "probe", line_hb)
+    async def no_link():
+        return None
+    monkeypatch.setattr(runmod.Agent, "job_link_layer", lambda self: no_link())  # CI runners have a real /sys link
+    run_for(cfg, 19)
+    rows = db(cfg, "select start_ms, primary_cause, evidence_json, tags_json from incidents")
+    assert len(rows) == 1 and rows[0][1] == "R2" and "likely" in json.loads(rows[0][2])["label"]
+    assert json.loads(rows[0][3])["segments"] == ["line"]
+    replayed = [c.obj.incident for c in replay(cfg.db_path) if c.type == "incident" and c.obj.op == "open"]
+    assert [(i.start_ms, sorted(i.segments)) for i in replayed] == [(rows[0][0], ["line"])]
+
+
+def test_packet_strip_saved_around_incident(fakes, tmp_path):
+    from whydrop.analysis.incidents import Incident
+    cfg, _, _ = fakes
+
+    class Book:
+        def ring_window(self, a, b):
+            return [(a + 1000, 7, True, "ok"), (a + 2000, 8, False, "up"), (a + 3000, -1, False, "local")]
+
+    async def go():
+        agent = runmod.Agent(cfg, asyncio.Event())
+        await agent.store.open()
+        agent.stream = type("S", (), {"book": Book()})()
+        agent._strip("open", Incident(start_ms=100_000))
+        await asyncio.gather(*agent._bg)
+        await agent.store.close()
+    asyncio.run(go())
+    assert db(cfg, "select seq, echoed, dir from udp_seq_ring order by seq") == [(7, 1, "ok"), (8, 0, "up")]

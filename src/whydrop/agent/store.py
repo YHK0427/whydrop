@@ -92,6 +92,8 @@ assert ", ".join(f.name for f in fields(SampleRow)) == _SAMPLE_COLS
 
 class Store:
     def __init__(self, path: Path, agent_id: int = 1):
+        self.listeners: list = []   # (rows, events) callbacks: the live analysis reads what is recorded
+        self.late_listeners: list = []  # (ts, probe, pair, direction) for rows already flushed
         self._path = Path(path)
         self.agent_id = agent_id
         self.paused = False  # disk guard: when True, buffered rows are dropped instead of written
@@ -118,13 +120,19 @@ class Store:
 
     async def add_samples(self, rows: list[SampleRow]) -> None:
         self._samples.extend(rows)
+        for fn in self.listeners:
+            fn(rows, [])
 
     async def add_events(self, events: list[Event]) -> None:
         self._events.extend(events)
+        for fn in self.listeners:
+            fn([], events)
 
     def add_events_nowait(self, events: list[Event]) -> None:
         """For sync callbacks (canary/stream events): buffered like add_events, flushed with the next commit."""
         self._events.extend(events)
+        for fn in self.listeners:
+            fn([], events)
 
     def _flush_sync(self, samples: list[SampleRow], events: list[Event]) -> None:
         with self._con:
@@ -156,6 +164,8 @@ class Store:
             r.late += 1
             r.lost = max(0, r.lost - 1)
             return
+        for fn in self.late_listeners:
+            fn(ts_ms, probe, pair, None)
 
         def upd():
             with self._con:
@@ -173,6 +183,8 @@ class Store:
             r.lost = max(0, r.lost - 1)
             setattr(r, col, max(0, getattr(r, col) - 1))
             return
+        for fn in self.late_listeners:
+            fn(ts_ms, probe, pair, direction)
         await self.execute(f"UPDATE samples_1s SET late = late + 1, lost = MAX(0, lost - 1), {col} = MAX(0, {col} - 1) "
                            "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=?", (self.agent_id, ts_ms, probe, pair))
 
@@ -194,6 +206,12 @@ class Store:
             with self._con:
                 return self._con.execute(sql, params).fetchall()
         return await self._db(ex)
+
+    async def executemany(self, sql: str, rows: list[tuple]) -> None:
+        def ex():
+            with self._con:
+                self._con.executemany(sql, rows)
+        await self._db(ex)
 
     async def execute_rowcount(self, sql: str, params: tuple = ()) -> int:
         def ex():

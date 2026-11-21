@@ -26,6 +26,7 @@ class _Bucket:
     local_fail: int = 0
     rtts: list[float] = field(default_factory=list)
     icmp: int = 0
+    extra: dict = field(default_factory=dict)
 
 
 class Aggregator:
@@ -40,6 +41,8 @@ class Aggregator:
     def add(self, r: Result) -> None:
         b = self._open.setdefault((r.t_send_ms // 1000 * 1000, r.probe, r.pair), _Bucket())
         b.sent += 1
+        if r.probe == "wifi" and r.detail:
+            b.extra.update({k: r.detail[k] for k in ("signal_dbm", "tx_retries", "beacon_loss") if k in r.detail})
         if r.ok:
             b.ok += 1
             if r.rtt_ms is not None:
@@ -71,6 +74,6 @@ class Aggregator:
                 rtt_min=rtts[0] if rtts else None, rtt_max=rtts[-1] if rtts else None,
                 rtt_avg=round(sum(rtts) / len(rtts), 3) if rtts else None,
                 rtt_p95=rtts[max(0, int(len(rtts) * 0.95) - 1)] if rtts else None,
-                extra_json=json.dumps({"icmp": b.icmp}) if b.icmp else None))
+                extra_json=json.dumps({**({"icmp": b.icmp} if b.icmp else {}), **b.extra}) if b.icmp or b.extra else None))
         if rows:
             await self._store.add_samples(rows)
