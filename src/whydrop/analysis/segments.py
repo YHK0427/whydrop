@@ -1,10 +1,13 @@
 """Segment states, one state machine each (spec §6.2). Pure: fed one Frame per second, in order."""
+from collections import deque
 from dataclasses import dataclass, field
 
 from whydrop.analysis import constants as K
-from whydrop.analysis.model import Context, Frame
+from whydrop.analysis.model import Context, Frame, line_quorum
 
 LOCAL = ("host_net", "wifi", "link")
+DNS_CLASSES = ("dns_router", "dns_isp", "dns_public")
+REFLECTOR = ("udp_stream", "canary")
 
 
 @dataclass
@@ -53,10 +56,24 @@ class Segments:
         self._lan = "unobservable" if not ctx.lan_observable else "unknown"
         self._lan_misses: list[int] = []
         self._announced = False
+        self._q: deque = deque()                 # (t_ms, probe, pair, provider, failed, row) of line-quorum sends
+        self._line = "unknown"
+        self._line_start: int | None = None
+        self._line_detail: dict = {}
+        self._gated = False
+        self._first_ok: int | None = None
+        self._stream_bad_prev = False
+        self.last_recovery_ms = -1                # last lan/line recovery: DNS attempts before it don't count
+        self._dns = {c: "unknown" for c in DNS_CLASSES}
+        self._dns_hist = {c: deque() for c in DNS_CLASSES}
 
     def state(self, segment: str) -> str:
         if segment == "lan":
             return self._lan
+        if segment == "line":
+            return "down" if self._line == "down" else self._line
+        if segment in self._dns:
+            return self._dns[segment]
         return self.local[segment].state
 
     def _local_good(self, frame: Frame, seg: str) -> bool | None:
@@ -77,7 +94,13 @@ class Segments:
             if change:
                 t = frame.t_ms if forced else held._run[1]
                 out.append(SegmentChange(t, seg, change))
+        lan_before = self._lan
         out += self._step_lan(frame)
+        if lan_before == "down" and self._lan == "up":
+            self.last_recovery_ms = frame.t_ms
+        if not (frame.lag or frame.suspended):
+            out += self._step_line(frame)
+            out += self._step_dns(frame)
         return out
 
     def _step_lan(self, frame: Frame) -> list[SegmentChange]:
@@ -103,3 +126,130 @@ class Segments:
             self._lan = "down"
             return [SegmentChange(self._lan_misses[0], "lan", "down")]
         return []
+
+    # ---------- line ----------
+    def _quorum_rows(self, frame: Frame):
+        stream_bad = False
+        for (probe, pair), r in frame.samples.items():
+            if not line_quorum(probe, pair, self.ctx):
+                continue
+            judged = r.sent - r.local_fail
+            if judged <= 0:
+                continue                                 # only local send failures: that's host_net's business
+            if probe == "udp_stream":                    # ≥ 80 % loss for 2 s counts as a failed send
+                bad = (r.lost + r.late) >= K.STREAM_LOSS_FRAC * judged
+                failed, stream_bad = bad and self._stream_bad_prev, bad
+                if failed:                               # the run's first second counts too, once confirmed
+                    for x in reversed(self._q):
+                        if x[1] == "udp_stream":
+                            x[4] = True
+                            break
+            else:
+                failed = r.ok == 0
+            yield probe, pair, self.ctx.provider(probe, pair), failed, r
+        self._stream_bad_prev = stream_bad
+
+    def _link_ok(self) -> bool:
+        link_seg = "wifi" if self.ctx.link_kind != "wired" else "link"
+        return self.local[link_seg].state != "down" and self._lan != "down"
+
+    def _step_line(self, frame: Frame) -> list[SegmentChange]:
+        t = frame.t_ms
+        rows = list(self._quorum_rows(frame))
+        for probe, pair, prov, failed, r in rows:
+            self._q.append([t, probe, pair, prov, failed, r])
+        while self._q and self._q[0][0] < t - (K.GATE_WINDOW_S + K.GATE_SHORT_S + 5) * 1000:
+            self._q.popleft()
+        return self._line_down_check(t) if self._line != "down" else self._line_recovery(t, rows)
+
+    def _line_down_check(self, t: int) -> list[SegmentChange]:
+        self._line = "up" if any(not x[4] for x in self._q if x[0] == t) else self._line
+        if not self._link_ok():
+            return []
+        win = [x for x in self._q if x[0] >= t - (K.LINE_LOOKBACK_S - 1) * 1000]
+        basic = [x for x in win if x[1] not in REFLECTOR]
+        refl = [x for x in win if x[1] in REFLECTOR]
+        if not basic or not all(x[4] for x in basic) or not all(x[4] for x in refl):
+            return []
+        failing = basic + refl
+        if len({x[3] for x in failing}) < K.LINE_MIN_PROVIDERS or sum(x[5].sent if x[1] not in REFLECTOR else 1
+                                                                   for x in failing) < K.LINE_MIN_SENDS:
+            return []
+        oks = [x[0] for x in self._q if not x[4] and x[0] < win[0][0]]
+        start = min(x[0] for x in self._q if x[4] and x[0] > (max(oks) if oks else -1))
+        span = [x[5] for x in self._q if x[0] >= start]
+        lost, late = sum(r.lost for r in span), sum(r.late for r in span)
+        hb = [x[5] for x in self._q if x[1] == "line_hb" and start - K.GATE_WINDOW_S * 1000 <= x[0] < start]
+        sent_hb = sum(r.sent - r.local_fail for r in hb)
+        hb_loss = sum(r.lost + r.late for r in hb) / sent_hb if sent_hb else 0.0
+        self._line, self._line_start, self._first_ok = "down", start, None
+        self._gated = hb_loss >= K.GATE_LOSS_FRAC
+        self._line_detail = {"providers": sorted(p for p in {x[3] for x in failing} if p),
+                             "queueing_evidence": (lost + late) > 0 and late / (lost + late) >= K.LATE_QUEUEING_FRAC,
+                             "prior_line_hb_loss": round(hb_loss, 3)}
+        if self._gated:
+            return []                                    # a lossy period: wait to see whether it's only a burst
+        return [SegmentChange(start, "line", "down", dict(self._line_detail))]
+
+    def _line_recovery(self, t: int, rows) -> list[SegmentChange]:
+        out = []
+        if rows and all(not x[3] for x in rows):
+            if self._first_ok is None:
+                self._first_ok = t
+        elif any(x[3] for x in rows):
+            self._first_ok = None
+        recovered = self._first_ok is not None and t - self._first_ok >= (K.LINE_RECOVER_S - 1) * 1000
+        short = K.GATE_SHORT_S * 1000
+        if self._gated:
+            if recovered and self._first_ok - self._line_start < short:
+                out.append(SegmentChange(self._line_start, "line", "burst",
+                                         {"duration_s": (self._first_ok - self._line_start) / 1000}))
+                self._line, self._gated = "up", False
+                return out
+            if t - self._line_start >= short and (self._first_ok is None or self._first_ok - self._line_start >= short):
+                self._gated = False
+                out.append(SegmentChange(self._line_start, "line", "down", dict(self._line_detail)))
+        if recovered and not self._gated:
+            out.append(SegmentChange(self._first_ok, "line", "up"))
+            self._line = "up"
+            self.last_recovery_ms = self._first_ok
+        return out
+
+    # ---------- DNS ----------
+    def _dns_window_ms(self, cls: str) -> int:
+        base = self.ctx.intervals.get("dns", 5)
+        iv = max(base, 10) if cls == "dns_public" and self.ctx.mode == "precision" else base
+        return int(K.DNS_WINDOW_INTERVALS * iv * 1000)
+
+    def _step_dns(self, frame: Frame) -> list[SegmentChange]:
+        t, out = frame.t_ms, []
+        for (probe, pair), r in frame.samples.items():
+            if probe != "dns" or not self.ctx.usable(probe, pair) or r.sent - r.local_fail <= 0:
+                continue
+            cls = pair.split(":", 1)[0]
+            if cls in self._dns_hist:
+                self._dns_hist[cls].append((t, pair, r.ok == 0))
+        for cls in DNS_CLASSES:
+            h = self._dns_hist[cls]
+            win = self._dns_window_ms(cls)
+            while h and h[0][0] <= t - 3 * win:
+                h.popleft()
+            now = [x for x in h if x[0] == t]
+            if self._dns[cls] == "down":
+                ok = [x for x in now if not x[2]]
+                if ok:
+                    self._dns[cls] = "up"
+                    out.append(SegmentChange(t, cls, "up"))
+                continue
+            if any(not x[2] for x in now):
+                self._dns[cls] = "up"
+            if self._line == "down" or not self._link_ok():
+                continue
+            recent = [x for x in h if x[0] > t - win and x[0] > self.last_recovery_ms]
+            pairs: dict[str, list[bool]] = {}
+            for _, pair, failed in recent:
+                pairs.setdefault(pair, []).append(failed)
+            if pairs and all(len(v) >= K.DNS_MIN_ATTEMPTS and all(v) for v in pairs.values()):
+                self._dns[cls] = "down"
+                out.append(SegmentChange(min(x[0] for x in recent), cls, "down", {"pairs": len(pairs)}))
+        return out
