@@ -108,7 +108,7 @@
   "label.user-test": "내 테스트",
   "nat.title": "NAT 타임아웃",
   "nat.keepalive": "{proto} keepalive는 {s}초 이하로 설정하세요",
-  "nat.range": "{proto} 매핑은 {lo}~{hi}초 동안 조용하면 사라져요",
+  "nat.range": "{proto} 매핑은 {lo}~{hi}초 조용하면 사라져요",
   "nat.open": "{proto}는 {lo}초 넘게 유지됐어요. 그보다 짧은 keepalive는 필요 없어요",
   "nat.none": "아직 NAT 테스트를 하지 않았어요.",
   "nat.run": "NAT 테스트 실행",
