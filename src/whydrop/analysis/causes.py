@@ -45,7 +45,7 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
     if not late and not based:
         return False, False
     a, b = inc.start_ms - K.QUEUE_LOOKBACK_S * 1000, inc.start_ms
-    slow, gw_slow, gw_before = set(), False, []
+    slow, gw_slow, gw_before = set(), 0, []
     for f in frames:
         if f.t_ms >= b or f.t_ms < a - 600_000:
             continue
@@ -59,10 +59,10 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
             if p in RTT_SOURCES and r.ok and r.rtt_avg is not None and base is not None \
                     and r.rtt_avg >= K.LATENCY_FACTOR * base and r.rtt_avg >= base + K.LATENCY_PLUS_MS:
                 slow.add(pair)
-        if gw is not None and gw.rtt_avg is not None and gw_before:
+        if gw is not None and gw.ok and gw.rtt_avg is not None and gw_before:
             g0 = min(gw_before)
-            gw_slow |= gw.rtt_avg >= K.LATENCY_FACTOR * g0 and gw.rtt_avg >= g0 + K.LATENCY_PLUS_MS
-    return late or len(slow) >= 2, gw_slow  # two different pairs, not one slow pair twice; the router's RTT either way
+            gw_slow += gw.rtt_avg >= K.LATENCY_FACTOR * g0 and gw.rtt_avg >= g0 + K.LATENCY_PLUS_MS
+    return late or len(slow) >= 2, gw_slow >= 2  # two different pairs, not one slow pair twice; the router twice, either way
 
 
 def _direction(inc: Incident, frames) -> dict:

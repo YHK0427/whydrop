@@ -117,6 +117,9 @@ def test_late_replies_with_a_slow_router_are_in_home_queueing():
     [f] = run(s)[1]
     assert f.cause.rule == "R7" and f.cause.label == texts.IN_HOME_QUEUEING and f.cause.next_step == texts.IN_HOME_STEP
     [g] = run(Scenario.default(200).internet_down(30, 36, kind="late"))[1]      # router fine: queueing past it
+    blip = Scenario.default(200).slow(28, 29, probes={"gateway"}, rtt=400.0).internet_down(30, 36, kind="late")
+    [h] = run(blip)[1]                                                          # one slow router reply is not enough
+    assert h.cause.label == texts.QUEUEING_TIMEOUTS
     assert g.cause.label == texts.QUEUEING_TIMEOUTS
 
 
