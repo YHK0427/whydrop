@@ -53,7 +53,7 @@ Both ends share a secret (`WHYDROP_SECRET`); every packet carries an HMAC, and t
 docker compose exec whydrop whydrop nat-test
 ```
 
-Measures how long the NAT and firewalls on your path keep an idle UDP mapping (10 s – 10 min) and an idle TCP connection (1 min – 1 h), all delays in parallel, and recommends a keepalive: *"UDP mapping lasts 30–45 s → set keepalive to 20 s or less."* Needs precision mode.
+Measures how long the NAT and firewalls on your path keep an idle UDP mapping (10 s – 10 min) and an idle TCP connection (1 min – 1 h), all delays in parallel, and recommends a keepalive: for example *"timeout between 90 s and 120 s; keepalive 70 s or less"* (a real home router). Needs precision mode.
 
 ## Configuration
 
