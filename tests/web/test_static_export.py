@@ -29,7 +29,7 @@ def test_static_site_public_only(tmp_path):
     data = {p.name: p.read_text(encoding="utf-8") for p in (site / "data").glob("*.json")}
     assert m["static"] and m["files"] == len(data)
     for need in ("status.json", "incidents_2592000.json", "incidents_7776000.json", "chart_3600.json", "incidents_1.json",
-                 "incidents_1_strip.json", "chart_incident_1.json", "nat.json"):
+                 "incidents_1_strip.json", "chart_incident_1.json", "nat.json", "annotations_3600.json"):
         assert need in data, need
     blob = "\n".join(data.values())
     leaked = {ip for ip in IPV4.findall(blob) if ip not in KNOWN_RESOLVERS and not ip.startswith("x.x.x.")}

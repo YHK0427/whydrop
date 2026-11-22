@@ -45,3 +45,17 @@ def test_static_shell_served_with_csp():
     for path in ("/", "/app.js", "/tokens.css", "/i18n/ko.json", "/vendor/uplot/uPlot.esm.js", "/fonts/PretendardVariable.woff2"):
         r = c.get(path)
         assert r.status_code == 200 and "default-src 'self'" in r.headers["content-security-policy"], path
+
+
+def test_every_finding_kind_has_words_in_both_languages():
+    """The My network page lists findings by kind; a kind without words showed as a raw key (target_specific)."""
+    import re
+    from pathlib import Path
+    src = "\n".join(p.read_text(encoding="utf-8") for p in Path("src/whydrop").rglob("*.py"))
+    kinds = set(re.findall(r'"finding", now, [^,]+, \{"kind": "(\w+)"', src)) \
+        | set(re.findall(r'insert\("findings", kind="(\w+)"', src)) \
+        | set(re.findall(r'IncidentChange\("finding", None, "(\w+)"', src))         | set(re.findall(r'standing\("(\w+)"', src))
+    assert {"target_specific", "idle_expiry_repeat", "vpn_egress", "secret_mismatch"} <= kinds, kinds   # the scan really finds them
+    for lang in ("en", "ko"):
+        words = load(f"{lang}.json")
+        assert not {k for k in kinds if f"finding.{k}" not in words}, (lang, kinds)
