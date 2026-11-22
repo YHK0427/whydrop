@@ -94,7 +94,9 @@ export async function mount(main, { id, refresh }) {
         body: `Rule ${d.rule}, ${Math.round(durS)} s.\n\nWhat really happened:\n\n(Attach the bug report JSON from "${t("drop.export_json")}".)` })}` },
       t("drop.wrong")));
 
-  const evRows = Object.entries(d.evidence).filter(([k]) => !["label", "next_step", "protocol", "events"].includes(k));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);   // cause_X repeats the incident's own X
+  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "events"].includes(k)
+    && !(k.startsWith("cause_") && same(d.evidence[k.slice(6)], v)));
   const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });
   cleanup.push(() => lanesEl.cleanup());
@@ -110,7 +112,7 @@ export async function mount(main, { id, refresh }) {
       pathDiagram(frozenPath(d, st?.link), { frozen: true, vertical: window.matchMedia("(max-width: 640px)").matches })),
     h("section", { class: "panel" }, h("h2", {}, t("drop.next")), h("p", { class: "protocol" }, d.next || "–")),
     h("section", { class: "panel" }, h("h2", {}, t("drop.timeline")), h("h3", {}, t("drop.strip")), strip(ringRows), lanesEl),
-    d.protocol ? h("section", { class: "panel" }, h("h2", {}, t("drop.protocol")), h("p", { class: "protocol" }, d.protocol)) : null,
+    ...(d.protocol ? [h("section", { class: "panel" }, h("h2", {}, t("drop.protocol")), h("p", { class: "protocol" }, d.protocol))] : []),
     h("section", { class: "panel split" },
       h("div", {}, h("h2", {}, t("drop.evidence")), evRows.length ? h("dl", { class: "kv" },
         evRows.flatMap(([k, v]) => [h("dt", {}, t(`ev.${k}`) === `ev.${k}` ? k : t(`ev.${k}`)),

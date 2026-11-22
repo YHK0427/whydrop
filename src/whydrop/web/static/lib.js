@@ -99,7 +99,7 @@ const tzShort = () => new Intl.DateTimeFormat(lang, { timeZoneName: "short" }).f
 export function when(ms, nowMs = Date.now()) {
   if (isPublic) return dur(Math.max(0, (nowMs - ms) / 1000)) + (lang === "ko" ? " 전" : " ago");
   const d = new Date(ms), now = new Date(nowMs);
-  const tm = d.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const tm = d.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86400000);
   const s = diff === 0 ? t("time.today", { t: tm }) : diff === 1 ? t("time.yesterday", { t: tm })
@@ -108,7 +108,7 @@ export function when(ms, nowMs = Date.now()) {
 }
 
 export function clock(ms) {
-  return new Date(ms).toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return new Date(ms).toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
 }
 
 export function dur(sec) {

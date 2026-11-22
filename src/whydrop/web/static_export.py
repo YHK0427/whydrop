@@ -96,6 +96,7 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
             await grab("/api/chart", key_for("/api/chart", span), q)
             await grab("/api/conditions", key_for("/api/conditions", span), q)
             await grab("/api/events", key_for("/api/events", span, kind="rst"), {**q, "kind": "rst"})
+            await grab("/api/annotations", key_for("/api/annotations", span), q)   # scene tags on the Now page
         for inc in incidents:
             iid = inc["id"]
             await grab(f"/api/incidents/{iid}", key_for(f"/api/incidents/{iid}"))

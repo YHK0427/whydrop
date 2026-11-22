@@ -1,7 +1,7 @@
 // Time-aligned lanes on one x axis with a shared crosshair (UI design doc §6): packet loss (mirrored up/down bars),
 // latency (line + usual band), TCP connection (state band). Every lane has a table view with the same data.
 import uPlot from "../vendor/uplot/uPlot.esm.js";
-import { clock, h, t, tsMs } from "../lib.js";
+import { clock, h, lang, t, tsMs } from "../lib.js";
 
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -60,7 +60,14 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
   const sync = uPlot.sync("whydrop");
   const width = (box) => Math.max(200, Math.min(1200, (box || root).clientWidth - 2));   // the content box, not main's padding
   const cursor = { sync: { key: sync.key }, points: { show: false } };
-  const axisX = { stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { stroke: css("--rule") } };
+  const timeFmt = (splits) => {   // the UI language's clock (24 h in Korean), not uPlot's built-in English am/pm
+    const span = splits.length > 1 ? splits[splits.length - 1] - splits[0] : 0;
+    const f = new Intl.DateTimeFormat(lang, span > 1.5 * 86400 ? { month: "numeric", day: "numeric", hour: "2-digit", hourCycle: "h23" }
+      : span <= 900 ? { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }   // a drop's ±60 s window
+      : { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    return splits.map(s => f.format(s * 1000));
+  };
+  const axisX = { stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { stroke: css("--rule") }, values: (u, splits) => timeFmt(splits) };
   const axisY = (label) => ({ stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { show: false }, label, size: 46 });
   const bars = uPlot.paths.bars({ size: [0.9, 12] });
   const charts = [];

@@ -71,7 +71,7 @@ Everything is optional. Settings come from `WHYDROP_*` environment variables (in
 - **Now**: one sentence ("Everything is working." / "Internet line is down right now (32 s so far)."), the path diagram, your last drop, and three lanes on one time axis — packet loss (upload above the line, download below), latency with the usual range shaded, and the TCP connection's state.
 - **Drops**: every drop; open one for its timeline, the per-packet strip (10 squares a second), *In protocol terms* (sequence numbers, retransmissions, RST or not), evidence and exports.
 - **NAT timeouts**, **Protocol** (live packets as hex with every field named), **My network** (the mode, which targets were excluded and why, findings, availability this month).
-- English and Korean, light and dark, phone-sized screens. **I'm testing now** opens a 2-minute window labelled as your test, so you can prove it works before a real drop happens.
+- English and Korean, light and dark, phone-sized screens. **Start a 2-minute test** opens a 2-minute window labelled as your test, so you can prove it works before a real drop happens.
 
 The dashboard needs a token when it listens beyond localhost. `?public=1` switches any page to the public view: addresses hidden, times relative — the same view the bug reports and alerts use.
 

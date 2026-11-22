@@ -17,7 +17,7 @@ export async function mount(main, { refresh }) {
       || (segment === "dns" && r.raw.some(s => s.startsWith("dns")))));
     body.replaceChildren(...shown.map(r => h("tr", {},
       h("td", {}, h("a", { href: `#/drop/${r.id}` }, when(r.start))),
-      h("td", {}, r.open ? "…" : dur((r.end - r.start) / 1000)),
+      h("td", {}, r.point ? "–" : r.open ? "…" : dur((r.end - r.start) / 1000)),
       h("td", {}, r.segs.join(", ") || "–"),
       h("td", {}, r.label))));
     empty.hidden = shown.length > 0;
@@ -26,7 +26,7 @@ export async function mount(main, { refresh }) {
   select.addEventListener("change", draw);
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("drops.title")),
     h("div", { class: "row" }, select, segment ? h("span", { class: "faint" }, `${t("drops.col.where")}: ${segment}`) : null),
-    h("table", { class: "data" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>
+    h("table", { class: "data drops-table" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>
       h("th", { scope: "col" }, t(`drops.col.${c}`))))), body), empty));
   draw();
 }
