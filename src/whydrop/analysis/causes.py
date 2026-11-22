@@ -45,11 +45,14 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
     if not late and not based:
         return False, False
     a, b = inc.start_ms - K.QUEUE_LOOKBACK_S * 1000, inc.start_ms
-    slow, gw_slow, gw_before = set(), 0, []
+    end = inc.end_ms if inc.end_ms is not None else max((f.t_ms for f in frames), default=b)
+    slow, gw_slow, gw_before, gw_timeouts = set(), 0, [], 0
     for f in frames:
+        gw = f.samples.get(("gateway", "gateway"))
+        if late and gw is not None and b - K.GW_TIMEOUT_LEAD_S * 1000 <= f.t_ms <= end:
+            gw_timeouts += gw.lost > 0   # replies behind the router came back late: the router is up, its hop is slow
         if f.t_ms >= b or f.t_ms < a - 600_000:
             continue
-        gw = f.samples.get(("gateway", "gateway"))
         if f.t_ms < a:
             if gw is not None and gw.rtt_avg is not None:
                 gw_before.append(gw.rtt_avg)
@@ -62,7 +65,7 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
         if gw is not None and gw.ok and gw.rtt_avg is not None and gw_before:
             g0 = min(gw_before)
             gw_slow += gw.rtt_avg >= K.LATENCY_FACTOR * g0 and gw.rtt_avg >= g0 + K.LATENCY_PLUS_MS
-    return late or len(slow) >= 2, gw_slow >= 2  # two different pairs, not one slow pair twice; the router twice, either way
+    return late or len(slow) >= 2, gw_slow >= 2 or gw_timeouts >= 2   # two pairs, not one twice; the router twice
 
 
 def _direction(inc: Incident, frames) -> dict:

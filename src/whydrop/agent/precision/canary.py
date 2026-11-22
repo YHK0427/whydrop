@@ -163,7 +163,8 @@ class HotCanary(_Canary):
     role = Role.HOT
 
     def __init__(self, reflector, secret, on_event, *, hb_s: float = 1.0, stall_s: float = 3.0,
-                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, udp_rtt=None, on_result=None, **kw):
+                 reconnect_stall_s: float = 20.0, tcp_info_s: float = 10.0, udp_rtt=None, on_result=None,
+                 middlebox_hold_s: float = 60.0, **kw):
         super().__init__(reflector, secret, on_event, **kw)
         self.hb_s, self.stall_s, self.reconnect_stall_s, self.tcp_info_s = hb_s, stall_s, reconnect_stall_s, tcp_info_s
         self._rtts: deque[float] = deque(maxlen=20)
@@ -172,6 +173,7 @@ class HotCanary(_Canary):
         self.on_result = on_result      # Result per HB (ok, or lost after stall_s) for the analysis
         self._suspend = False
         self.middlebox = False
+        self.middlebox_hold_s, self._mb_since = middlebox_hold_s, None
 
     def _result(self, t_ms, ok: bool, rtt=None) -> None:
         if self.on_result and t_ms is not None:
@@ -189,8 +191,13 @@ class HotCanary(_Canary):
         if u is None or len(self._rtts) < 10:
             return
         flag = self.rtt_ms < (0.7 if self.middlebox else 0.5) * u  # on below 0.5x, off above 0.7x
-        if flag != self.middlebox:
-            self.middlebox = flag
+        if flag == self.middlebox:
+            self._mb_since = None
+            return
+        now = self.mono()
+        self._mb_since = now if self._mb_since is None else self._mb_since
+        if now - self._mb_since >= self.middlebox_hold_s:   # a middlebox lasts; after a stall the two medians differ for seconds
+            self.middlebox, self._mb_since = flag, None
             self.emit("middlebox", flag=flag, canary_ms=round(self.rtt_ms, 2), udp_ms=round(u, 2))
 
     async def _session(self, reader, writer, stop) -> str:

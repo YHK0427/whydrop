@@ -39,6 +39,7 @@ BUSY_LAG_MS = 10
 LATENCY_WINDOW_S = 30
 LATENCY_FACTOR = 3.0
 LATENCY_PLUS_MS = 50
+GW_TIMEOUT_LEAD_S = 3            # router-check timeouts this long before a late-reply drop still count as in-home
 LATENCY_MIN_PROVIDERS = 2
 BASELINE_NONE_S = 3600           # R7 not evaluated in the first hour
 BASELINE_LEARNING_S = 24 * 3600
