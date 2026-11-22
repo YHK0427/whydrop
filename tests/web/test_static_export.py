@@ -100,3 +100,16 @@ def test_cli_export_static_refuses_cleanly(tmp_path, capsys):
     f.write_text("keep")
     assert main(["export-static", str(tmp_path / "w.db"), "--out", str(f)]) == 2
     assert f.read_text() == "keep" and "whydrop:" in capsys.readouterr().err
+
+
+def test_export_without_to_ends_at_the_recording_not_the_export(tmp_path):
+    """Exported an hour after recording, the demo said 'last drop 36 min ago' measured from the export, and its banner
+    gave UTC dates (a recording from 23:49 to 02:15 KST read 'Nov 22 to Nov 22')."""
+    import datetime as dt
+    then = int(time.time() * 1000) - 3 * 3_600_000
+    st = build(tmp_path, then)
+    last = sqlite3.connect(tmp_path / "w.db").execute("SELECT MAX(ts_ms) FROM samples_1s").fetchone()[0]
+    m = export_static(tmp_path / "w.db", tmp_path / "site", None, None, {"mode": "precision"})
+    assert m["recorded"][1] == dt.datetime.fromtimestamp(last / 1000).strftime("%Y-%m-%d")
+    chart = json.loads((tmp_path / "site" / "data" / "chart_3600.json").read_text(encoding="utf-8"))
+    assert chart["x_rel"] and max(chart["x_rel"]) > -120          # the last hour of the recording, not of the export
