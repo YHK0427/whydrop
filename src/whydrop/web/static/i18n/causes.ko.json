@@ -24,7 +24,7 @@
   "DNS-wide failure (likely)": "DNS 전반 장애 (추정)",
   "In-home queueing (likely)": "집 안 대기열 (추정)",
   "Loss on the home network (likely)": "집 안 네트워크 손실 (추정)",
-  "The router checks are failing too: check the Wi-Fi signal and interference before calling your ISP": "공유기 확인도 같이 실패하고 있어요. 통신사에 연락하기 전에 와이파이 신호와 간섭을 확인하세요",
+  "The router checks are failing too: check the Wi-Fi signal or the cable to the router before calling your ISP": "공유기 확인도 같이 실패하고 있어요. 통신사에 연락하기 전에 와이파이 신호나 공유기까지의 케이블을 확인하세요",
   "The delay starts before the router: check the Wi-Fi signal and heavy traffic from other devices at home": "지연이 공유기 앞에서 시작돼요. 와이파이 신호와 집 안 다른 기기의 큰 트래픽을 확인하세요",
   "Queueing caused the timeouts (likely)": "대기열이 시간 초과를 일으킴 (추정)",
 

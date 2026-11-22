@@ -65,11 +65,12 @@ class Conditions:
         return self._hb.b >= MIN_SENDS and self._hb.a / self._hb.b >= K.LOSS_FRAC / 2
 
     def loss_at_home(self) -> bool:
-        """The router checks lose at least the loss bar and half as much as the line: the loss starts at home."""
-        if self._gw.b < MIN_SENDS:
+        """The router checks lose at least the loss bar and half as much as the line heartbeat over the same 60 s
+        (in both modes): the loss starts at home. A router that never answers can't tell home from line."""
+        if self._gw.b < MIN_SENDS or self._gw.a >= self._gw.b:
             return False
         gw = self._gw.a / self._gw.b
-        line = self._loss.a / self._loss.b if self._loss.b else 0.0
+        line = self._hb.a / self._hb.b if self._hb.b else 0.0
         return gw >= K.LOSS_FRAC and gw >= line / 2
 
     def active(self, kind: str) -> bool:
@@ -149,7 +150,7 @@ class Conditions:
 
         # Wi-Fi/LAN loss: associated, but the gateway misses ≥ 10 % over 60 s
         gw = frame.samples.get(("gateway", "gateway"))
-        if usable and gw is not None and (wifi is None or wifi.ok) and gw.sent - gw.local_fail > 0:
+        if usable and not outage and gw is not None and (wifi is None or wifi.ok) and gw.sent - gw.local_fail > 0:
             self._gw.add(t, gw.lost, gw.sent - gw.local_fail)
         gw_loss = self._gw.a / self._gw.b if self._gw.b >= MIN_SENDS else 0.0
         out += self._set("wifi_lan_loss", gw_loss >= K.WIFI_LAN_LOSS_FRAC, t, {"gateway_loss": round(gw_loss, 3)})

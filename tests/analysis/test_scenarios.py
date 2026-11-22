@@ -78,6 +78,9 @@ def test_loss_with_the_router_checks_failing_too_is_home_loss():
     line = Scenario.default(900).fail(60, 660, probes=QUORUM, frac=0.15, rand=3)
     first = next(c for c in run(line)[1] if c.type == "condition" and c.obj.kind == "loss")
     assert first.cause.label == texts.CAUSES["R6"][0]                       # router clean: still the line
+    mute = Scenario.default(900).fail(0, 900, probes={"gateway"}).fail(60, 660, probes=QUORUM, frac=0.15, rand=3)
+    first = next(c for c in run(mute)[1] if c.type == "condition" and c.obj.kind == "loss")
+    assert first.cause.label == texts.CAUSES["R6"][0]                       # router never answers: can't tell
 
 
 def test_06_saturated_uplink_r7_via_late_replies():
