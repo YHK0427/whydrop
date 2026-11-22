@@ -234,7 +234,7 @@ def test_middlebox_flag_when_tcp_much_faster_than_udp():
 
     async def main():
         srv, port = await reflector()
-        c = canary(port, events, hb_s=0.05, udp_rtt=lambda: 100.0)  # loopback TCP < 1 ms vs "100 ms" UDP
+        c = canary(port, events, hb_s=0.05, udp_rtt=lambda: 100.0, middlebox_hold_s=0.2)  # loopback TCP < 1 ms vs "100 ms" UDP
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
         await asyncio.sleep(1.0)
@@ -292,3 +292,45 @@ def test_rst_before_the_suspend_report_is_dropped():
         srv.close()
     asyncio.run(main())
     assert "rst" not in [e.kind for e in events]
+
+
+def test_middlebox_needs_a_lasting_difference_not_a_stall():
+    """Seen at home: after a 3 s stall the UDP median (its last 100 replies, many of them late) stayed high for a few
+    seconds while the canary's median (last 20 heartbeats, few new ones during the stall) did not, and 'something
+    answers TCP for the reflector' switched on and off 20 times in one night. A middlebox is a lasting property."""
+    now = [0.0]
+    c = HotCanary(("127.0.0.1", 1), S, lambda e: None, session_id=7, mono=lambda: now[0], udp_rtt=lambda: udp[0])
+    events = []
+    c.emit = lambda kind, **d: events.append((kind, d))
+    c._rtts.extend([12.0] * 20)
+    c.rtt_ms = 12.0
+    udp = [400.0]
+    for t in range(15):                  # 15 s of a skewed UDP median, then it settles
+        now[0] = float(t)
+        c._check_middlebox()
+    udp[0] = 14.0
+    for t in range(15, 120):
+        now[0] = float(t)
+        c._check_middlebox()
+    assert not c.middlebox and events == []
+    udp[0] = 100.0                       # a real proxy: TCP stays ~8x faster, for good
+    for t in range(120, 200):
+        now[0] = float(t)
+        c._check_middlebox()
+    assert c.middlebox and len(events) == 1
+
+
+def test_middlebox_hold_restarts_after_a_gap():
+    """Review: the hold only counts while heartbeats keep being answered; a stall or reconnect starts it again."""
+    now = [0.0]
+    c = HotCanary(("127.0.0.1", 1), S, lambda e: None, session_id=7, mono=lambda: now[0], udp_rtt=lambda: 100.0)
+    events = []
+    c.emit = lambda kind, **d: events.append(kind)
+    c._rtts.extend([12.0] * 20)
+    c.rtt_ms = 12.0
+    for t in (0, 1, 2):
+        now[0] = float(t)
+        c._check_middlebox()
+    now[0] = 90.0                        # the next answer after a long silence
+    c._check_middlebox()
+    assert events == [] and not c.middlebox

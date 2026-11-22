@@ -46,17 +46,21 @@ def key_for(path: str, span: int | None = None, incident: int | None = None, kin
     return k + ".json"
 
 
-def _first_ms(db: Path) -> int | None:
+def _edge_ms(db: Path, fn: str) -> int | None:
     import sqlite3
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        return con.execute("SELECT MIN(t) FROM (SELECT MIN(ts_ms) t FROM samples_1s UNION ALL SELECT MIN(ts_ms) FROM samples_1m)").fetchone()[0]
+        return con.execute(f"SELECT {fn}(t) FROM (SELECT {fn}(ts_ms) t FROM samples_1s UNION ALL SELECT {fn}(ts_ms) FROM samples_1m)").fetchone()[0]
     finally:
         con.close()
 
 
+def _first_ms(db: Path) -> int | None:
+    return _edge_ms(db, "MIN")
+
+
 def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | None = None, status_extra: dict | None = None) -> dict:
-    now = to_ms or int(time.time() * 1000)
+    now = to_ms or _edge_ms(db, "MAX") or int(time.time() * 1000)   # the recording's end, not the export's moment
     app = create_app(db, Bus(), token=None, allowed_hosts=["localhost"], public_default=True, clock=lambda: now,
                      status=lambda: {"mode": (status_extra or {}).get("mode", "basic"), "baseline": "ready",
                                      "segments": {s: "up" for s in ("host_net", "wifi", "lan", "line", "dns")},
@@ -113,8 +117,8 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
         p = data / name
         if name.endswith("_summary.json"):
             p.write_text(json.dumps(p.read_text(encoding="utf-8"), ensure_ascii=False), encoding="utf-8")
-    from datetime import datetime, timezone
-    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d")  # noqa: E731  dates only
+    from datetime import datetime
+    day = lambda ms: datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d")  # noqa: E731  the recorder's own calendar
     manifest = {"static": True, "files": len(written), "recorded": [day(from_ms or _first_ms(db) or now), day(now)]}
     (out / "static.json").write_text(json.dumps(manifest), encoding="utf-8")
     return manifest

@@ -123,6 +123,21 @@ def test_late_replies_with_a_slow_router_are_in_home_queueing():
     assert g.cause.label == texts.QUEUEING_TIMEOUTS
 
 
+def test_router_checks_timing_out_during_a_late_reply_drop_are_in_home_queueing():
+    """Seen at home 2026-11-23 01:42: the router check timed out for 8 s (from 3 s before the line went down) while
+    everything behind the router came back 0.5-1.9 s late. Late replies prove the router is alive, so a router that
+    can't answer its own check in time means the delay is on this side of it."""
+    s = Scenario.default(200).fail(27, 36, probes={"gateway"}).internet_down(30, 36, kind="late")
+    [f] = run(s)[1]
+    assert f.cause.rule == "R7" and f.cause.label == texts.IN_HOME_QUEUEING, f.cause.label
+    one = Scenario.default(200).fail(33, 34, probes={"gateway"}).internet_down(30, 36, kind="late")
+    [g] = run(one)[1]                                                   # one timeout is not enough
+    assert g.cause.label == texts.QUEUEING_TIMEOUTS
+    alone = Scenario.default(200).fail(27, 30, probes={"gateway"}).internet_down(30, 36, kind="late")
+    [h] = run(alone)[1]                       # router timeouts with nothing late beyond it in those seconds: no proof
+    assert h.cause.label == texts.QUEUEING_TIMEOUTS
+
+
 def test_queueing_first_before_r2():
     s = Scenario.default(4000).slow(3700, 3720, probes={"tcp_connect", "stun", "line_hb"}, rtt=400.0)
     s.internet_down(3720, 3725)
