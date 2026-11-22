@@ -40,10 +40,10 @@ def _events(inc: Incident, kind: str, a_ms: int, b_ms: int) -> list:
 def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
     """(queueing before the drop, also on the gateway) — successful samples in the 10 s before were ≥ 3× baseline
     and ≥ +50 ms, or most sends behind the line down came back late."""
-    if any(d.detail.get("queueing_evidence") for d in inc.downs if d.segment == "line"):
-        return True, False
-    if cond is None or cond.baseline_state(inc.start_ms) == "none":
-        return False, False  # no baseline in the first hour
+    late = any(d.detail.get("queueing_evidence") for d in inc.downs if d.segment == "line")
+    based = cond is not None and cond.baseline_state(inc.start_ms) != "none"   # no baseline in the first hour
+    if not late and not based:
+        return False, False
     a, b = inc.start_ms - K.QUEUE_LOOKBACK_S * 1000, inc.start_ms
     slow, gw_slow, gw_before = set(), False, []
     for f in frames:
@@ -55,14 +55,14 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
                 gw_before.append(gw.rtt_avg)
             continue
         for (p, pair), r in f.samples.items():
-            base = cond.baseline(pair) if cond else None
+            base = cond.baseline(pair) if based else None
             if p in RTT_SOURCES and r.ok and r.rtt_avg is not None and base is not None \
                     and r.rtt_avg >= K.LATENCY_FACTOR * base and r.rtt_avg >= base + K.LATENCY_PLUS_MS:
                 slow.add(pair)
         if gw is not None and gw.rtt_avg is not None and gw_before:
             g0 = min(gw_before)
             gw_slow |= gw.rtt_avg >= K.LATENCY_FACTOR * g0 and gw.rtt_avg >= g0 + K.LATENCY_PLUS_MS
-    return len(slow) >= 2, gw_slow  # two different pairs, not one slow pair twice
+    return late or len(slow) >= 2, gw_slow  # two different pairs, not one slow pair twice; the router's RTT either way
 
 
 def _direction(inc: Incident, frames) -> dict:
@@ -108,7 +108,11 @@ def classify(inc: Incident, frames, cond, ctx: Context) -> Cause:
         return _cause("R1d")
     queued, at_home = _queueing(inc, frames, cond)
     if queued and segs & {"lan", "line"}:
-        return _cause("R7", texts.IN_HOME_QUEUEING if at_home else texts.QUEUEING_TIMEOUTS)
+        if at_home:
+            c = _cause("R7", texts.IN_HOME_QUEUEING)
+            c.next_step = texts.IN_HOME_STEP
+            return c
+        return _cause("R7", texts.QUEUEING_TIMEOUTS)
     if "lan" in segs:
         known = ctx.link_kind != "unknown" and not ctx.vpn
         return _cause("R1b" if known else "R1b_unobservable", secondary=_secondary(inc))

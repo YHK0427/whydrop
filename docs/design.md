@@ -82,7 +82,7 @@ In priority order; windows are anchored on the incident start unless a rule says
 | R7 | High latency (queueing) | labels a latency rough patch; also the primary cause of a router or line drop under the queueing-first rule below | Enable SQM (cake/fq_codel) on the router, or limit uploads |
 | — | Unknown | none of the above | File a "wrong diagnosis" issue with the bug report attached |
 
-**Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too, "in-home queueing".
+**Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too (either way), "in-home queueing", whose next step points at the Wi-Fi and other devices at home instead of SQM.
 
 Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot seen over Wi-Fi → one incident, R1a, with the WAN coming back later joining it as "router restart (likely)". A saturated uplink → R7.
 

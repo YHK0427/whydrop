@@ -31,7 +31,7 @@ def test_every_cause_text_has_korean():
     from whydrop.analysis import texts
     ko = load("causes.ko.json")
     server = {v[0] for v in texts.CAUSES.values()} | {v[1] for v in texts.CAUSES.values()} | set(texts.R3_LABELS.values()) \
-        | {texts.IN_HOME_QUEUEING, texts.QUEUEING_TIMEOUTS}
+        | {texts.IN_HOME_QUEUEING, texts.QUEUEING_TIMEOUTS, texts.IN_HOME_STEP}
     assert server <= set(ko), server - set(ko)
     assert all("추정" in ko[k] for k in server if "likely" in k)
 

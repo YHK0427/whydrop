@@ -41,4 +41,5 @@ R3_LABELS = {
 
 ROUTER_RESTART = "router restart (likely)"
 IN_HOME_QUEUEING = "In-home queueing (likely)"
+IN_HOME_STEP = "The delay starts before the router: check the Wi-Fi signal and heavy traffic from other devices at home"
 QUEUEING_TIMEOUTS = "Queueing caused the timeouts (likely)"

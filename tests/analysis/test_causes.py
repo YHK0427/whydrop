@@ -110,6 +110,16 @@ def test_r7_via_late_replies():     # scenario 6: saturated uplink, queueing 1.5
     assert rules(s) == ["R7"]
 
 
+def test_late_replies_with_a_slow_router_are_in_home_queueing():
+    """Seen on the home server: the router's RTT rose to 300-700 ms, then everything behind it came back 1-1.7 s late.
+    The delay is on this side of the router, so it is in-home queueing, not 'enable SQM on the router'."""
+    s = Scenario.default(200).slow(22, 30, probes={"gateway"}, rtt=400.0).internet_down(30, 36, kind="late")
+    [f] = run(s)[1]
+    assert f.cause.rule == "R7" and f.cause.label == texts.IN_HOME_QUEUEING and f.cause.next_step == texts.IN_HOME_STEP
+    [g] = run(Scenario.default(200).internet_down(30, 36, kind="late"))[1]      # router fine: queueing past it
+    assert g.cause.label == texts.QUEUEING_TIMEOUTS
+
+
 def test_queueing_first_before_r2():
     s = Scenario.default(4000).slow(3700, 3720, probes={"tcp_connect", "stun", "line_hb"}, rtt=400.0)
     s.internet_down(3720, 3725)
