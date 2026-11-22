@@ -24,12 +24,13 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref, '-') }}
       - name: build and smoke-test every architecture before anything is pushed
         run: |
           for arch in linux/amd64 linux/arm64 linux/arm/v7; do
             docker buildx build --platform "$arch" --load -t "whydrop:smoke" .
-            docker run --rm --platform "$arch" whydrop:smoke --version
+            v=$(docker run --rm --platform "$arch" whydrop:smoke --version)
+            test "$v" = "whydrop ${GITHUB_REF_NAME#v}" || { echo "tag $GITHUB_REF_NAME but the image says $v"; exit 1; }
             docker run --rm --platform "$arch" whydrop:smoke reflector --help > /dev/null
           done
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

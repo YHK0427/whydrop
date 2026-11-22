@@ -53,7 +53,7 @@ docker compose exec whydrop cat /data/ui-token   # 나중에 토큰 다시 보�
 docker compose exec whydrop whydrop nat-test
 ```
 
-경로에 있는 NAT와 방화벽이 쉬고 있는 UDP 매핑(10초~10분)과 TCP 연결(1분~1시간)을 얼마나 기억하는지 모든 대기 시간을 동시에 재고, keepalive를 권해 줘요. *"UDP 매핑은 30~45초 유지 → keepalive를 20초 이하로."* 정밀 모드가 필요해요.
+경로에 있는 NAT와 방화벽이 쉬고 있는 UDP 매핑(10초~10분)과 TCP 연결(1분~1시간)을 얼마나 기억하는지 모든 대기 시간을 동시에 재고, keepalive를 권해 줘요. 예를 들면 *"timeout between 90 s and 120 s; keepalive 70 s or less"*(실제 집 공유기의 결과)처럼요. 정밀 모드가 필요해요.
 
 ## 설정
 

@@ -48,7 +48,7 @@ export async function mount(main, { refresh }) {
     const [lo, hi] = bracket(list);
     if (lo != null && hi != null) {
       const first = !hero.some(x => x.classList.contains("status"));   // the shortest keepalive is the hero
-      hero.push(h("p", { class: first ? "status" : "lastdrop" }, t("nat.keepalive", { s: Math.max(5, Math.floor(lo * 0.8 / 5) * 5) })),
+      hero.push(h("p", { class: first ? "status" : "lastdrop" }, t("nat.keepalive", { proto: proto.toUpperCase(), s: Math.max(5, Math.floor(lo * 0.8 / 5) * 5) })),
         h("p", { class: first ? "lastdrop" : "faint" }, t("nat.range", { proto: proto.toUpperCase(), lo, hi })));
     } else if (lo != null) {
       hero.push(h("p", { class: "lastdrop" }, t("nat.open", { proto: proto.toUpperCase(), lo })));
