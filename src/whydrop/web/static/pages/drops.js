@@ -26,7 +26,7 @@ export async function mount(main, { refresh }) {
   select.addEventListener("change", draw);
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("drops.title")),
     h("div", { class: "row" }, select, segment ? h("span", { class: "faint" }, `${t("drops.col.where")}: ${segment}`) : null),
-    h("table", { class: "data" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>
+    h("table", { class: "data drops-table" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>
       h("th", { scope: "col" }, t(`drops.col.${c}`))))), body), empty));
   draw();
 }

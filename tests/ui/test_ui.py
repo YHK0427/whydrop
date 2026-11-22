@@ -1,6 +1,7 @@
 """Dashboard checks in a real browser against the fixture (UI design doc §9, §11): axe-core with zero serious or
 critical violations on every screen in both themes and both languages, a complete keyboard path, no console errors,
 and Korean wrapping at 360 px without horizontal scroll. Skipped when Playwright's Chromium isn't installed."""
+import re
 import socket
 import threading
 import time
@@ -106,7 +107,7 @@ def test_keyboard_path_reaches_every_control(browser, base):
         seen.append(page.evaluate("() => { const e = document.activeElement; return (e.getAttribute('aria-label') || e.textContent || '').trim().slice(0, 30) }"))
     ctx.close()
     text = " | ".join(seen)
-    for must in ("Drops", "NAT timeouts", "Internet line", "Last 1 h", "I'm testing now", "Table"):
+    for must in ("Drops", "NAT timeouts", "Internet line", "Last 1 h", "Start a 2-minute test", "Table"):
         assert must in text, (must, text)
 
 
@@ -173,3 +174,29 @@ def test_no_screen_prints_null_or_undefined(browser, base):
     text = page.inner_text("main")
     ctx.close()
     assert "null" not in text, text
+
+
+def test_point_event_drop_page_has_no_null_and_no_repeated_evidence(browser, base):
+    """QA on the real DB: a point event (no protocol paragraph) printed 'null' on its drop page, and its evidence listed
+    cause_interval_s next to interval_s."""
+    import json as _json
+
+    def strip_protocol(route):
+        body = _json.loads(route.fetch().text())
+        ev = _json.loads(body["evidence_json"]) if body.get("evidence_json") else body.get("evidence", {})
+        ev["protocol"] = ""
+        ev["interval_s"] = ev["cause_interval_s"] = 600
+        if body.get("evidence_json"):
+            body["evidence_json"] = _json.dumps(ev)
+        else:
+            body["evidence"] = ev
+        route.fulfill(content_type="application/json", body=_json.dumps(body))
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    page.route(re.compile(r".*/api/incidents/1(\?.*)?$"), strip_protocol)
+    page.goto(f"{base}/#/drop/1")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+    text = page.inner_text("main")
+    ctx.close()
+    assert "null" not in text and "cause_interval_s" not in text, text[-600:]

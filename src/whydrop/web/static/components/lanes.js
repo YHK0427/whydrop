@@ -61,8 +61,10 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
   const width = (box) => Math.max(200, Math.min(1200, (box || root).clientWidth - 2));   // the content box, not main's padding
   const cursor = { sync: { key: sync.key }, points: { show: false } };
   const timeFmt = (splits) => {   // the UI language's clock (24 h in Korean), not uPlot's built-in English am/pm
-    const long = splits.length > 1 && splits[splits.length - 1] - splits[0] > 1.5 * 86400;
-    const f = new Intl.DateTimeFormat(lang, long ? { month: "numeric", day: "numeric", hour: "2-digit", hour12: false } : { hour: "2-digit", minute: "2-digit", hour12: false });
+    const span = splits.length > 1 ? splits[splits.length - 1] - splits[0] : 0;
+    const f = new Intl.DateTimeFormat(lang, span > 1.5 * 86400 ? { month: "numeric", day: "numeric", hour: "2-digit", hour12: false }
+      : span <= 900 ? { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }   // a drop's ±60 s window
+      : { hour: "2-digit", minute: "2-digit", hour12: false });
     return splits.map(s => f.format(s * 1000));
   };
   const axisX = { stroke: css("--ink-3"), grid: { stroke: css("--rule") }, ticks: { stroke: css("--rule") }, values: (u, splits) => timeFmt(splits) };

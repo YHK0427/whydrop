@@ -52,7 +52,7 @@
   "lane.table": "Table",
   "lane.chart": "Chart",
   "lane.show_charts": "Show charts",
-  "test.button": "I'm testing now",
+  "test.button": "Start a 2-minute test",
   "test.hint": "Want proof it works? Turn your Wi-Fi off for 10 seconds after pressing this.",
   "test.started": "Test window open for 2 minutes: toggle your Wi-Fi now.",
   "recent.title": "Recent drops",

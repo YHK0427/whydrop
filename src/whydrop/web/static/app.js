@@ -83,7 +83,7 @@ async function render() {
   const main = h("main", { id: "main", tabindex: "-1" });
   app.replaceChildren(main);
   if (STATIC) main.before(h("p", { class: "banner static" }, t("static.banner", { from: STATIC.recorded?.[0] || "", to: STATIC.recorded?.[1] || "" })));
-  if (isPublic) main.before(h("p", { class: "publicbadge" }, t("badge.public")));   // in the flow: a fixed badge covered the charts
+  if (isPublic) main.before(h("div", { class: "publicbar" }, h("span", { class: "publicbadge" }, t("badge.public"))));   // in the flow: a fixed badge covered the charts
   const undo = await mod.mount(main, { id: m?.[1] && Number(m[1]), refresh: render });
   if (mine !== generation) undo?.();        // finished after a newer render began: undo only this mount
   else dispose = undo;

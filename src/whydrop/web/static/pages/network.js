@@ -1,6 +1,6 @@
 // My network (#/network): what is being watched, what was excluded and why, findings, availability, heatmap
 // (UI design doc §5.5).
-import { api, dur, errorPanel, h, parseIncident, t } from "../lib.js";
+import { api, cause, dur, errorPanel, h, parseIncident, t } from "../lib.js";
 
 function heatmap(drops) {
   const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -39,7 +39,7 @@ export async function mount(main, { refresh }) {
           h("span", { class: "faint" }, t(m.drops === 1 ? "net.availability.sub_one" : "net.availability.sub",
             { drops: m.drops ?? 0, dur: dur(m.down_s || 0) }))))),
     h("section", { class: "panel" }, h("h2", {}, t("net.excluded")), excluded.length
-      ? h("ul", { class: "drops" }, excluded.map(([pair, why]) => h("li", {}, h("span", { class: "what" }, pair), ": ", why)))
+      ? h("ul", { class: "drops" }, excluded.map(([pair, why]) => h("li", {}, h("span", { class: "what" }, pair), ": ", cause(why))))
       : h("p", { class: "faint" }, typeof check.excluded === "number" && check.excluded
         ? t("net.excluded_count", { n: check.excluded }) : t("net.none_excluded"))),
     h("section", { class: "panel" }, h("h2", {}, t("net.findings")), open.length
