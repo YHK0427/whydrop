@@ -24,6 +24,8 @@ CAUSES = {
     "R3": ("DNS failure (likely)", "Switch your device or router to a public DNS"),
     "R2": ("Line drop in the ISP segment (likely)", "Save the evidence with export and contact your ISP"),
     "R6": ("Lossy line (likely)", "Save the evidence and contact your ISP"),
+    "R6_home": ("Loss on the home network (likely)",
+                "The router checks are failing too: check the Wi-Fi signal or the cable to the router before calling your ISP"),
     "R6_path": ("Lossy path to the reflector (likely)", "Save the evidence; the loss is on the way to the reflector"),
     "R7": ("High latency from queueing (likely)", "Enable SQM (cake/fq_codel) on the router, or limit uploads"),
     "unknown": ("No known pattern matched (likely something new)",
@@ -41,4 +43,5 @@ R3_LABELS = {
 
 ROUTER_RESTART = "router restart (likely)"
 IN_HOME_QUEUEING = "In-home queueing (likely)"
+IN_HOME_STEP = "The delay starts before the router: check the Wi-Fi signal and heavy traffic from other devices at home"
 QUEUEING_TIMEOUTS = "Queueing caused the timeouts (likely)"

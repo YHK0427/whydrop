@@ -1,6 +1,7 @@
 """Spec §11.1 scenario tests 1–22, end to end through the Engine (one function per spec line)."""
 from scen import Scenario
 from whydrop.agent.store import SampleRow
+from whydrop.analysis import texts
 from whydrop.analysis.engine import Engine
 from whydrop.measure.direction import Echo, outage_totals
 
@@ -65,6 +66,21 @@ def test_05_random_8pct_loss_is_r6_period_not_incident():
     finals, ch, _ = run(s)
     periods = [c for c in ch if c.type == "condition" and c.obj.kind == "loss" and c.obj.phase == "start"]
     assert finals == [] and periods and periods[0].cause.rule == "R6"
+
+
+def test_loss_with_the_router_checks_failing_too_is_home_loss():
+    """Seen on the home server: evening loss periods with line loss 6-28 % while 12-53 % of the router checks failed
+    were all called a lossy line ('contact your ISP'). Loss the router shares starts at home."""
+    s = Scenario.default(900).fail(60, 660, probes=QUORUM | {"gateway"}, frac=0.15, rand=3)
+    finals, ch, _ = run(s)
+    periods = [c for c in ch if c.type == "condition" and c.obj.kind == "loss" and c.obj.phase == "start"]
+    assert finals == [] and periods and periods[0].cause.label == texts.CAUSES["R6_home"][0]
+    line = Scenario.default(900).fail(60, 660, probes=QUORUM, frac=0.15, rand=3)
+    first = next(c for c in run(line)[1] if c.type == "condition" and c.obj.kind == "loss")
+    assert first.cause.label == texts.CAUSES["R6"][0]                       # router clean: still the line
+    mute = Scenario.default(900).fail(0, 900, probes={"gateway"}).fail(60, 660, probes=QUORUM, frac=0.15, rand=3)
+    first = next(c for c in run(mute)[1] if c.type == "condition" and c.obj.kind == "loss")
+    assert first.cause.label == texts.CAUSES["R6"][0]                       # router never answers: can't tell
 
 
 def test_06_saturated_uplink_r7_via_late_replies():
