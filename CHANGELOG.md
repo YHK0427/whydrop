@@ -2,7 +2,7 @@
 
 All notable changes. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
-## [Unreleased] — 0.1.0
+## [0.1.0] — 2026-11-23
 
 First release.
 
@@ -22,6 +22,7 @@ First release.
 - Per-second segment states (host network, Wi-Fi, cable, router, line, three DNS classes) with provider quorum and a lossy-period gate.
 - Incidents with merging and point events; conditions and rough patches; prioritised cause rules R1a–R7 with queueing-first; provisional and final (80 s) causes.
 - `whydrop replay` re-runs the analysis over a recorded database, with `--set` to try other thresholds.
+- Verdicts checked against two days of real home data: late replies count as having crossed the router, queueing before the router is in-home queueing, and loss the router checks share is home-network loss rather than the line.
 
 ### Dashboard and exports
 - Now, Drops, NAT timeouts, Protocol and My network pages; English and Korean; light and dark; phone-sized.
