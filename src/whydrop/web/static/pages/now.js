@@ -7,6 +7,10 @@ import { api, cause, dur, endMs, errorPanel, h, isPublic, parseIncident, prefsGe
 const isRemote = () => !["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
 const RANGES = [["1h", 3600], ["6h", 21600], ["24h", 86400], ["7d", 604800]];
 
+function lossWhere(d) {   // line / path (to the reflector) / home; rows before 0.1.0 carry only the label
+  return d.where || (/reflector/.test(d.label || "") ? "path" : /home network/.test(d.label || "") ? "home" : "line");
+}
+
 function statusSentence(st, open, rough) {
   if (!st) return t("status.not_recording", { since: "–" });
   const segs = st.segments || {};
@@ -17,7 +21,7 @@ function statusSentence(st, open, rough) {
   }
   if (rough) {
     const d = rough.detail_json ? JSON.parse(rough.detail_json) : (rough.detail || {});
-    return t("status.rough", { pct: Math.max(1, Math.round((d.loss || 0) * 100)) });
+    return t(`status.rough${{ path: "_path", home: "_home" }[lossWhere(d)] || ""}`, { pct: Math.max(1, Math.round((d.loss || 0) * 100)) });
   }
   return t("status.ok");
 }
@@ -32,7 +36,7 @@ function lastDrop(drops, st) {
   }
   const d = done[0];
   return h("div", { class: "row" },
-    h("p", { class: "lastdrop" }, t("last.drop", { when: when(d.start), dur: dur((d.end - d.start) / 1000),
+    h("p", { class: "lastdrop" }, d.point ? t("last.event", { when: when(d.start), cause: d.label }) : t("last.drop", { when: when(d.start), dur: dur((d.end - d.start) / 1000),
       where: d.segs.join(", ") || d.label, cause: d.segs.length ? d.label : "" })),
     h("a", { class: "btn", href: `#/drop/${d.id}` }, t("last.open")));
 }
@@ -50,11 +54,12 @@ export async function mount(main, { refresh }) {
   const cleanup = [];   // this mount's own: a later mount of the same page never shares it
   const range = Number(prefsGet("whydrop.range") || 3600);
   const to = Date.now(), from = to - range * 1000;
-  let st, incs, conds, findings, samples, events;
+  let st, incs, conds, findings, samples, events, anns;
   try {
     [st, incs, conds, findings] = await Promise.all([refreshStatus(), api(`/api/incidents?from=${to - 30 * 86400000}&to=${to}`),
       api(`/api/conditions?from=${from}&to=${to}`), api("/api/findings")]);
-    [samples, events] = await Promise.all([api(`/api/chart?from=${from}&to=${to}`), api(`/api/events?from=${from}&to=${to}&kind=rst`)]);
+    [samples, events, anns] = await Promise.all([api(`/api/chart?from=${from}&to=${to}`), api(`/api/events?from=${from}&to=${to}&kind=rst`),
+      api(`/api/annotations?from=${from}&to=${to}`).catch(() => [])]);
   } catch (e) {
     main.replaceChildren(errorPanel(e, refresh));
     return;
@@ -63,7 +68,7 @@ export async function mount(main, { refresh }) {
   let open = drops.find(d => d.open && d.segs.length);
   let roughNow = conds.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
   const roughSegs = new Set(conds.filter(c => (c.end_ms ?? c.end_s) == null)
-    .map(c => (c.kind === "loss" ? "line" : c.kind === "wifi_lan_loss" || c.kind === "weak_signal" ? (st?.link === "wired" ? "link" : "wifi") : null)));
+    .map(c => (c.kind === "loss" ? { line: "line", path: null, home: st?.link === "wired" ? "link" : "wifi" }[lossWhere(c.detail_json ? JSON.parse(c.detail_json) : (c.detail || {}))] : c.kind === "wifi_lan_loss" || c.kind === "weak_signal" ? (st?.link === "wired" ? "link" : "wifi") : null)));
   const vertical = window.matchMedia("(max-width: 640px)").matches;
 
   const sentence = h("h1", { class: "status", "aria-live": "polite" }, statusSentence(st, open, roughNow));
@@ -93,10 +98,15 @@ export async function mount(main, { refresh }) {
     charts.prepend(show);
   }
 
+  const scene = (s, e) => {   // a drop or patch inside an annotated scene says so: injected and reproduced aren't natural
+    const a = (anns || []).find(x => startMs(x) <= (e ?? Date.now()) && (endMs(x) ?? startMs(x)) >= s);
+    return a ? h("span", { class: "scenetag" }, t(`label.${a.label}`)) : null;
+  };
   const inRange = drops.filter(d => d.start >= from);
   const recent = h("div", {}, h("h2", {}, t("recent.title")), inRange.length
     ? h("ul", { class: "drops" }, inRange.slice(0, 8).map(d => h("li", {}, h("a", { href: `#/drop/${d.id}` },
-        h("span", { class: "what" }, `${when(d.start)}, ${d.open ? "…" : dur((d.end - d.start) / 1000)}, ${d.segs.join(", ") || ""}`),
+        h("span", { class: "what" }, [when(d.start), d.point ? null : d.open ? "…" : dur((d.end - d.start) / 1000), d.segs.join(", ") || null]
+          .filter(Boolean).join(", ")), scene(d.start, d.end),   // a point event has no duration
         h("div", { class: "muted" }, d.label)))))
     : h("p", { class: "empty" }, t("recent.none")));
   const roughList = conds.filter(c => c.kind === "loss" || c.kind === "latency" || c.kind === "wifi_lan_loss");
@@ -104,7 +114,7 @@ export async function mount(main, { refresh }) {
     ? h("ul", { class: "drops" }, roughList.slice(0, 8).map(c => {
         const d = c.detail_json ? JSON.parse(c.detail_json) : (c.detail || {});
         const s = startMs(c), e = endMs(c);
-        return h("li", {}, h("div", { class: "what" }, `${when(s)}${e ? ", " + dur((e - s) / 1000) : ""}`),
+        return h("li", {}, h("div", { class: "what" }, `${when(s)}${e ? ", " + dur((e - s) / 1000) : ""}`, scene(s, e)),
           h("div", { class: "muted" }, cause(d.label || c.kind)));
       }))
     : h("p", { class: "empty" }, t("rough.none")));

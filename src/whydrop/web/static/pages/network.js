@@ -40,8 +40,12 @@ export async function mount(main, { refresh }) {
             { drops: m.drops ?? 0, dur: dur(m.down_s || 0) }))))),
     h("section", { class: "panel" }, h("h2", {}, t("net.excluded")), excluded.length
       ? h("ul", { class: "drops" }, excluded.map(([pair, why]) => h("li", {}, h("span", { class: "what" }, pair), ": ", why)))
-      : h("p", { class: "faint" }, typeof check.excluded === "number" ? String(check.excluded) : t("net.none_excluded"))),
+      : h("p", { class: "faint" }, typeof check.excluded === "number" && check.excluded
+        ? t("net.excluded_count", { n: check.excluded }) : t("net.none_excluded"))),
     h("section", { class: "panel" }, h("h2", {}, t("net.findings")), open.length
-      ? h("ul", { class: "drops" }, open.map(f => h("li", {}, f.kind))) : h("p", { class: "faint" }, t("net.none_findings"))),
+      ? h("ul", { class: "drops" }, Object.entries(open.reduce((n, f) => ({ ...n, [f.kind]: (n[f.kind] || 0) + 1 }), {}))
+          .map(([kind, n]) => h("li", {}, t(`finding.${kind}`) === `finding.${kind}` ? kind : t(`finding.${kind}`),
+            n > 1 ? h("span", { class: "faint" }, ` ×${n}`) : null)))
+      : h("p", { class: "faint" }, t("net.none_findings"))),
     h("section", { class: "panel" }, h("h2", {}, t("net.heatmap")), heatmap(incs.map(parseIncident))));
 }

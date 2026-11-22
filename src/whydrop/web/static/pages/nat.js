@@ -65,8 +65,8 @@ export async function mount(main, { refresh }) {
     h("td", {}, r.alive == null ? t("nat.inconclusive") : r.alive ? t("nat.alive") : t("nat.forgotten"))));
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("nat.title")),
     ...(hero.length ? hero : [h("p", { class: "empty" }, t("nat.none"))]), h("div", { class: "row" }, btn, progress)),
-    rows.length ? h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by)),
-      h("table", { class: "data" }, h("tbody", {}, tableRows))) : null);
+    ...(rows.length ? [h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by)),
+      h("table", { class: "data" }, h("tbody", {}, tableRows)))] : []));   // replaceChildren(null) prints "null"
   const poll = running ? setTimeout(() => location.hash === "#/nat" && refresh(), 5000) : null;
   return () => clearTimeout(poll);
 }

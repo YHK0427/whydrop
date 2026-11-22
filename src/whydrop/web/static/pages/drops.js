@@ -17,7 +17,7 @@ export async function mount(main, { refresh }) {
       || (segment === "dns" && r.raw.some(s => s.startsWith("dns")))));
     body.replaceChildren(...shown.map(r => h("tr", {},
       h("td", {}, h("a", { href: `#/drop/${r.id}` }, when(r.start))),
-      h("td", {}, r.open ? "…" : dur((r.end - r.start) / 1000)),
+      h("td", {}, r.point ? "–" : r.open ? "…" : dur((r.end - r.start) / 1000)),
       h("td", {}, r.segs.join(", ") || "–"),
       h("td", {}, r.label))));
     empty.hidden = shown.length > 0;

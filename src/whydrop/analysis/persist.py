@@ -86,7 +86,7 @@ class Recorder:
             elif ch.type == "condition":
                 c = ch.obj
                 if c.phase == "start":
-                    d = dict(c.detail, **({"cause": ch.cause.rule, "label": ch.cause.label} if ch.cause else {}))
+                    d = dict(c.detail, **({"cause": ch.cause.rule, "label": ch.cause.label, **ch.cause.evidence} if ch.cause else {}))
                     self._conds[c.kind] = await self.store.insert("conditions", kind=c.kind, start_ms=c.t_ms,
                                                                   detail_json=json.dumps(d))
                     self._pub("condition", {"kind": c.kind, "start_ms": c.t_ms, "end_ms": None,

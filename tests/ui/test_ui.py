@@ -152,3 +152,24 @@ def test_public_view_charts_are_placed_at_now(browser, base):
     ctx.close()
     assert not got["abs"] and got["n"] > 0 and abs(got["now"] - got["last"]) < 600, got
     assert not errors, errors
+
+
+def test_no_screen_prints_null_or_undefined(browser, base):
+    """Seen on the home server before the first NAT test finished: the NAT page showed a bare 'null' under its
+    empty message (a null handed to replaceChildren becomes text)."""
+    import json as _json
+    import re
+    for name, route in SCREENS.items():
+        ctx, page, _ = open_page(browser, base, route)
+        assert not re.search(r"\b(null|undefined|NaN)\b", page.inner_text("main")), name
+        ctx.close()
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    page.route("**/api/nat*", lambda r: r.fulfill(content_type="application/json",
+                                                 body=_json.dumps({"running": None, "last_run": None, "results": []})))
+    page.goto(f"{base}/#/nat")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(400)
+    text = page.inner_text("main")
+    ctx.close()
+    assert "null" not in text, text

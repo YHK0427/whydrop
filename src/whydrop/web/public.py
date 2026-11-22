@@ -102,7 +102,7 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
     if kind == "condition":
         d = _j(r.get("detail_json", r.get("detail")))
         return {"kind": r.get("kind"), "start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms),
-                "detail": {k: v for k, v in d.items() if k in ("cause", "label", "loss", "providers", "dbm",
+                "detail": {k: v for k, v in d.items() if k in ("cause", "label", "where", "loss", "providers", "dbm",
                                                                "gateway_loss", "loop_lag_p95_ms")}}
     if kind == "finding":
         return {"kind": r.get("kind"), "start_s": _rel(r.get("start_ms"), now_ms), "end_s": _rel(r.get("end_ms"), now_ms)}
