@@ -64,6 +64,14 @@ class Conditions:
     def line_hb_lossy(self) -> bool:
         return self._hb.b >= MIN_SENDS and self._hb.a / self._hb.b >= K.LOSS_FRAC / 2
 
+    def loss_at_home(self) -> bool:
+        """The router checks lose at least the loss bar and half as much as the line: the loss starts at home."""
+        if self._gw.b < MIN_SENDS:
+            return False
+        gw = self._gw.a / self._gw.b
+        line = self._loss.a / self._loss.b if self._loss.b else 0.0
+        return gw >= K.LOSS_FRAC and gw >= line / 2
+
     def active(self, kind: str) -> bool:
         return kind in self._shown
 

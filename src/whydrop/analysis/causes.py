@@ -154,8 +154,10 @@ def _r3_kind(dns: set) -> str:
     return "wide"
 
 
-def label_period(kind: str, ctx: Context, line_hb_lossy: bool = True) -> Cause | None:
+def label_period(kind: str, ctx: Context, line_hb_lossy: bool = True, at_home: bool = False) -> Cause | None:
     """R6 and R7 label degraded periods (they never open incidents)."""
+    if kind == "loss" and at_home:
+        return _cause("R6_home")
     if kind == "loss":
         return _cause("R6" if ctx.mode == "basic" or line_hb_lossy else "R6_path")
     if kind == "latency":
