@@ -6,7 +6,7 @@ from whydrop.analysis import constants as K
 from whydrop.analysis import texts
 from whydrop.analysis.conditions import RTT_SOURCES
 from whydrop.analysis.incidents import Incident
-from whydrop.analysis.model import Context
+from whydrop.analysis.model import Context, line_quorum
 
 POINT_RULES = {"ip_change": "R4", "idle_state_lost": "R5", "nat_reset": "R5_reset", "roam_loss": "R1a_roam"}
 
@@ -37,7 +37,7 @@ def _events(inc: Incident, kind: str, a_ms: int, b_ms: int) -> list:
     return [e for e in inc.events if e.kind == kind and a_ms <= e.ts_ms <= b_ms]
 
 
-def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
+def _queueing(inc: Incident, frames, cond, ctx: Context) -> tuple[bool, bool]:
     """(queueing before the drop, also on the gateway) — successful samples in the 10 s before were ≥ 3× baseline
     and ≥ +50 ms, or most sends behind the line down came back late."""
     late = any(d.detail.get("queueing_evidence") for d in inc.downs if d.segment == "line")
@@ -49,8 +49,9 @@ def _queueing(inc: Incident, frames, cond) -> tuple[bool, bool]:
     slow, gw_slow, gw_before, gw_timeouts = set(), 0, [], 0
     for f in frames:
         gw = f.samples.get(("gateway", "gateway"))
-        if late and gw is not None and b - K.GW_TIMEOUT_LEAD_S * 1000 <= f.t_ms <= end:
-            gw_timeouts += gw.lost > 0   # replies behind the router came back late: the router is up, its hop is slow
+        if late and gw is not None and gw.lost > 0 and b - K.GW_TIMEOUT_LEAD_S * 1000 <= f.t_ms <= end:
+            gw_timeouts += any(x.late > 0 for (p, pair), x in f.samples.items() if line_quorum(p, pair, ctx))
+            # a reply from beyond the router came back late in the same second: the router is up, its hop is slow
         if f.t_ms >= b or f.t_ms < a - 600_000:
             continue
         if f.t_ms < a:
@@ -109,7 +110,7 @@ def classify(inc: Incident, frames, cond, ctx: Context) -> Cause:
         return _cause("R1c", secondary=_secondary(inc))
     if near("host_net", K.R1A_BEFORE_S, K.R1A_AFTER_S):
         return _cause("R1d")
-    queued, at_home = _queueing(inc, frames, cond)
+    queued, at_home = _queueing(inc, frames, cond, ctx)
     if queued and segs & {"lan", "line"}:
         if at_home:
             c = _cause("R7", texts.IN_HOME_QUEUEING)

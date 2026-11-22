@@ -318,3 +318,19 @@ def test_middlebox_needs_a_lasting_difference_not_a_stall():
         now[0] = float(t)
         c._check_middlebox()
     assert c.middlebox and len(events) == 1
+
+
+def test_middlebox_hold_restarts_after_a_gap():
+    """Review: the hold only counts while heartbeats keep being answered; a stall or reconnect starts it again."""
+    now = [0.0]
+    c = HotCanary(("127.0.0.1", 1), S, lambda e: None, session_id=7, mono=lambda: now[0], udp_rtt=lambda: 100.0)
+    events = []
+    c.emit = lambda kind, **d: events.append(kind)
+    c._rtts.extend([12.0] * 20)
+    c.rtt_ms = 12.0
+    for t in (0, 1, 2):
+        now[0] = float(t)
+        c._check_middlebox()
+    now[0] = 90.0                        # the next answer after a long silence
+    c._check_middlebox()
+    assert events == [] and not c.middlebox

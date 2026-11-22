@@ -159,6 +159,8 @@ class _Canary:
             writer.transport.abort()
 
 
+MIDDLEBOX_GAP_S = 5.0   # heartbeat answers further apart than this (a stall, a reconnect) restart the middlebox hold
+
 class HotCanary(_Canary):
     role = Role.HOT
 
@@ -173,7 +175,7 @@ class HotCanary(_Canary):
         self.on_result = on_result      # Result per HB (ok, or lost after stall_s) for the analysis
         self._suspend = False
         self.middlebox = False
-        self.middlebox_hold_s, self._mb_since = middlebox_hold_s, None
+        self.middlebox_hold_s, self._mb_since, self._mb_last = middlebox_hold_s, None, None
 
     def _result(self, t_ms, ok: bool, rtt=None) -> None:
         if self.on_result and t_ms is not None:
@@ -188,13 +190,15 @@ class HotCanary(_Canary):
     def _check_middlebox(self) -> None:
         """A TCP answer much faster than UDP over the same path means something nearer ends the TCP connection."""
         u = self.udp_rtt() if self.udp_rtt else None
-        if u is None or len(self._rtts) < 10:
+        now = self.mono()
+        gap, self._mb_last = now - (self._mb_last if self._mb_last is not None else now), now
+        if u is None or len(self._rtts) < 10 or gap > MIDDLEBOX_GAP_S:
+            self._mb_since = None                            # the hold needs continuous evidence: no gaps, no stalls
             return
         flag = self.rtt_ms < (0.7 if self.middlebox else 0.5) * u  # on below 0.5x, off above 0.7x
         if flag == self.middlebox:
             self._mb_since = None
             return
-        now = self.mono()
         self._mb_since = now if self._mb_since is None else self._mb_since
         if now - self._mb_since >= self.middlebox_hold_s:   # a middlebox lasts; after a stall the two medians differ for seconds
             self.middlebox, self._mb_since = flag, None

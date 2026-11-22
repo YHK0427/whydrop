@@ -133,6 +133,9 @@ def test_router_checks_timing_out_during_a_late_reply_drop_are_in_home_queueing(
     one = Scenario.default(200).fail(33, 34, probes={"gateway"}).internet_down(30, 36, kind="late")
     [g] = run(one)[1]                                                   # one timeout is not enough
     assert g.cause.label == texts.QUEUEING_TIMEOUTS
+    alone = Scenario.default(200).fail(27, 30, probes={"gateway"}).internet_down(30, 36, kind="late")
+    [h] = run(alone)[1]                       # router timeouts with nothing late beyond it in those seconds: no proof
+    assert h.cause.label == texts.QUEUEING_TIMEOUTS
 
 
 def test_queueing_first_before_r2():
