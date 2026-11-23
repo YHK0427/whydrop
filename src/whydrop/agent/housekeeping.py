@@ -9,24 +9,17 @@ KEEP_1S_MS = 7 * DAY_MS
 KEEP_INCIDENT_MS = 90 * DAY_MS
 INCIDENT_PAD_MS = 10 * 60_000
 GB = 2**30
+ROLLUP_LAG_MS = 5 * 60_000   # late replies still update 1 s rows for a few seconds: roll up well behind them
 
+# a minute is computed whole from its seconds, so rolling it again (after a clock step back) is safe
 _ROLLUP = """
-INSERT INTO samples_1m (agent_id, ts_ms, probe, pair, sent, ok, lost, lost_up, lost_down, lost_dir_unknown, late,
+INSERT OR REPLACE INTO samples_1m (agent_id, ts_ms, probe, pair, sent, ok, lost, lost_up, lost_down, lost_dir_unknown, late,
                         local_fail, rtt_min, rtt_avg, rtt_max, rtt_p95, extra_json)
 SELECT agent_id, (ts_ms / 60000) * 60000, probe, pair, SUM(sent), SUM(ok), SUM(lost), SUM(lost_up), SUM(lost_down),
        SUM(lost_dir_unknown), SUM(late), SUM(local_fail), MIN(rtt_min),
        SUM(rtt_avg * ok) / NULLIF(SUM(CASE WHEN rtt_avg IS NOT NULL THEN ok END), 0), MAX(rtt_max), MAX(rtt_p95), NULL
 FROM samples_1s WHERE agent_id = ? AND ts_ms >= ? AND ts_ms < ?
 GROUP BY agent_id, (ts_ms / 60000) * 60000, probe, pair
-ON CONFLICT (agent_id, ts_ms, probe, pair) DO UPDATE SET
-  rtt_avg = CASE WHEN ok + excluded.ok = 0 THEN NULL ELSE
-            (COALESCE(rtt_avg, 0) * ok + COALESCE(excluded.rtt_avg, 0) * excluded.ok) / (ok + excluded.ok) END,
-  sent = sent + excluded.sent, ok = ok + excluded.ok, lost = lost + excluded.lost, lost_up = lost_up + excluded.lost_up,
-  lost_down = lost_down + excluded.lost_down, lost_dir_unknown = lost_dir_unknown + excluded.lost_dir_unknown,
-  late = late + excluded.late, local_fail = local_fail + excluded.local_fail,
-  rtt_min = MIN(COALESCE(rtt_min, excluded.rtt_min), COALESCE(excluded.rtt_min, rtt_min)),
-  rtt_max = MAX(COALESCE(rtt_max, excluded.rtt_max), COALESCE(excluded.rtt_max, rtt_max)),
-  rtt_p95 = MAX(COALESCE(rtt_p95, excluded.rtt_p95), COALESCE(excluded.rtt_p95, rtt_p95))
 """
 
 # 1 s rows older than 7 days go, unless they sit within ±10 min of an incident that is under 90 days old
@@ -57,10 +50,24 @@ async def housekeep(store, now_ms: int, *, free_bytes=None, min_free_mb: int | N
 
     await store.flush()
     cutoff_1s = (now_ms - KEEP_1S_MS) // 60_000 * 60_000
-    since = int(await store.meta_get("rollup_until") or 0)
-    if cutoff_1s > since:
-        await store.execute(_ROLLUP, (store.agent_id, since, cutoff_1s))
-        await store.meta_set("rollup_until", str(cutoff_1s))
+    roll_to = (now_ms - ROLLUP_LAG_MS) // 60_000 * 60_000   # minute rows trail the 1 s rows by minutes, not a week
+    first = await store.execute("SELECT MIN(ts_ms) FROM samples_1s WHERE agent_id = ?", (store.agent_id,))
+    start = first[0][0] // 60_000 * 60_000 if first and first[0][0] is not None else roll_to
+    done = int(await store.meta_get("rollup_until") or 0)
+    if done > roll_to:   # the clock stepped back (a Pi without RTC rebooting offline): seconds land behind the point
+        run = await store.execute("SELECT start_ms FROM agent_runs WHERE agent_id = ? ORDER BY id DESC LIMIT 1",
+                                  (store.agent_id,))
+        began = min(run[0][0] if run else roll_to, roll_to) // 60_000 * 60_000 - 60_000   # this run wrote nothing earlier
+        done = max(began, done - KEEP_1S_MS + DAY_MS)   # below that, seconds are gone: recomputing would lose minutes
+        await store.meta_set("rollup_until", str(done))
+    since = max(done, start)   # skip empty hours
+    while since < roll_to:   # an hour per statement: a first run over a week of rows doesn't hold the store for long
+        stop = min(since + 3_600_000, roll_to)
+        await store.execute_atomic([(_ROLLUP, (store.agent_id, since, stop)),   # a crash can't roll an hour up twice
+                                    ("INSERT OR REPLACE INTO meta (key, value) VALUES ('rollup_until', ?)", (str(stop),))])
+        since = stop
+    if not await store.meta_get("rollup_until"):
+        await store.meta_set("rollup_until", str(roll_to))
     deleted, chunks = 0, 0
     while True:
         n = await store.execute_rowcount(_DELETE_CHUNK, (store.agent_id, cutoff_1s, now_ms - KEEP_INCIDENT_MS,

@@ -6,14 +6,14 @@ import json
 import logging
 import urllib.request
 
-from whydrop.web.public import public
+from whydrop.web.public import public, shown_segments, slowed
 
 log = logging.getLogger(__name__)
 
 KEEP_MS = 24 * 3600_000
 BACKOFF_S = (30, 60, 120, 300, 600, 1800)
 TIMEOUT_S = 10
-WORDS = {"line": "Internet line", "lan": "Router", "wifi": "Wi-Fi", "link": "Cable", "host_net": "This device",
+WORDS = {"home": "Home network", "line": "Internet line", "lan": "Router", "wifi": "Wi-Fi", "link": "Cable", "host_net": "This device",
          "dns_router": "DNS", "dns_isp": "DNS", "dns_public": "DNS"}
 
 
@@ -22,9 +22,10 @@ def text(row: dict, now_ms: int) -> tuple[str, str]:
     p = public(row, "incident", now_ms)
     label = p["evidence"].get("label", "Likely cause unknown")
     dur = (p["end_s"] or 0) - (p["start_s"] or 0)
-    where = ", ".join(dict.fromkeys(WORDS.get(s, s) for s in p["segments"])) or (p["point"] or "Connection").replace("_", " ")
-    title = f"whydrop: {where} dropped" if p["segments"] else f"whydrop: {where}"
-    sentence = (f"{where} dropped for {dur} s. {label}." if p["segments"] else f"{label}.")
+    segs, verb = shown_segments(p["segments"], p["evidence"]), "slowed down" if slowed(p["cause"]) else "dropped"
+    where = ", ".join(dict.fromkeys(WORDS.get(s, s) for s in segs)) or (p["point"] or "Connection").replace("_", " ")
+    title = f"whydrop: {where} {verb}" if segs else f"whydrop: {where}"
+    sentence = (f"{where} {verb} for {dur} s. {label}." if segs else f"{label}.")
     step = p["evidence"].get("next_step")
     return title, sentence + (f" {step}." if step else "")
 

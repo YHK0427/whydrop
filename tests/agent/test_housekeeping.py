@@ -1,7 +1,7 @@
 import asyncio
 import sqlite3
 
-from whydrop.agent.housekeeping import housekeep
+from whydrop.agent.housekeeping import ROLLUP_LAG_MS, housekeep
 from whydrop.agent.store import SampleRow, Store
 
 DAY = 86_400_000
@@ -81,3 +81,123 @@ def test_disk_guard_threshold(tmp_path):
         return low, ok, override
     low, ok, override = run(main())
     assert low["disk_full"] and not ok["disk_full"] and override["disk_full"]
+
+
+def test_recent_seconds_are_rolled_up_without_waiting_a_week(tmp_path):
+    rows = [SampleRow(NOW - 3 * 3_600_000 + i * 1000, "line_hb", "p", 1, 1, 0) for i in range(3 * 3600)]
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", rows)
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))   # a second pass adds nothing twice
+        until = int(await s.meta_get("rollup_until"))
+        await s.close()
+        return until
+    until = run(main())
+    p = tmp_path / "w.db"
+    assert until == (NOW - ROLLUP_LAG_MS) // 60_000 * 60_000
+    assert count(p, f"select sum(sent) from samples_1s where ts_ms < {until}") == count(p, "select sum(sent) from samples_1m")
+    assert count(p, "select max(ts_ms) from samples_1m") == until - 60_000
+    assert count(p, "select count(*) from samples_1s") == 3 * 3600      # 1 s rows still live 7 days
+
+
+def test_first_rollup_goes_an_hour_per_transaction(tmp_path):
+    first = NOW - 5 * 3_600_000 + 17_000                                  # not on a minute: the start rounds down
+    rows = [SampleRow(first + i * 10_000, "gateway", "gateway", 1, 1, 0) for i in range(5 * 360)]
+    spans = []
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", rows)
+        real = s.execute_atomic
+
+        async def spy(statements):
+            spans.append(statements[0][1][1:])                           # (since, stop) of the rollup statement
+            await real(statements)
+        s.execute_atomic = spy
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        await s.close()
+    run(main())
+    roll_to = (NOW - ROLLUP_LAG_MS) // 60_000 * 60_000
+    assert spans[0][0] == first // 60_000 * 60_000 and spans[-1][1] == roll_to
+    assert all(b - a <= 3_600_000 for a, b in spans)
+    assert all(spans[i][1] == spans[i + 1][0] for i in range(len(spans) - 1))   # no gap, no overlap
+    assert count(tmp_path / "w.db", "select sum(sent) from samples_1m") == sum(1 for r in rows if r.ts_ms < roll_to)
+
+
+def test_empty_store_starts_the_rollup_point_now(tmp_path):
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        until = await s.meta_get("rollup_until")
+        await s.close()
+        return int(until)
+    assert run(main()) == (NOW - ROLLUP_LAG_MS) // 60_000 * 60_000
+
+
+def test_rollup_waits_for_the_latest_late_reply():
+    from whydrop.agent.precision.udp_stream import LATE_MS
+    from whydrop.agent.probes.base import LATE_S
+    assert ROLLUP_LAG_MS > 2 * max(LATE_MS, LATE_S * 1000)              # a late reply never lands in a rolled-up second
+
+
+def test_rollup_skips_empty_hours(tmp_path):
+    first = NOW - 2 * 3_600_000
+    rows = [SampleRow(first + i * 1000, "gateway", "gateway", 1, 1, 0) for i in range(7200)]
+    spans = []
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", rows)
+        await s.meta_set("rollup_until", str(NOW - 7 * DAY))              # what the 7-day rollup of 0.1.0 left behind
+        real = s.execute_atomic
+
+        async def spy(statements):
+            spans.append(statements[0][1][1:])
+            await real(statements)
+        s.execute_atomic = spy
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        until = int(await s.meta_get("rollup_until"))
+        await s.close()
+        return until
+    until = run(main())
+    assert spans[0][0] == first and len(spans) == 2                       # two hours of rows, two statements
+    assert until == (NOW - ROLLUP_LAG_MS) // 60_000 * 60_000
+    assert count(tmp_path / "w.db", "select sum(sent) from samples_1m") == 7200 - ROLLUP_LAG_MS // 1000
+
+
+def test_seconds_written_after_a_clock_step_back_are_rolled_up(tmp_path):
+    """A Pi without an RTC loses power and boots 40 min in the past with the line down: those seconds land behind
+    the rollup point. Found in review: they were never rolled up, so the long views showed the outage as fine."""
+    rows = [SampleRow(NOW - 2 * 3_600_000 + i * 1000, "line_hb", "p", 1, 1, 0) for i in range(7200)]
+    back = NOW - 40 * 60_000
+    outage = [SampleRow(back + i * 1000, "line_hb", "p", 1, 0, 1) for i in range(600)]   # same seconds as before
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", rows)
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        await s.run_start(back, "t", {})                                    # the reboot, 40 min in the past
+        await s.add_samples(outage)
+        await s.flush()
+        await housekeep(s, back + 600_000, free_bytes=lambda: (10**12, 10**12))   # still in the past
+        await housekeep(s, NOW + 3_600_000, free_bytes=lambda: (10**12, 10**12))  # NTP is back
+        await s.close()
+    run(main())
+    p = tmp_path / "w.db"
+    assert count(p, "select sum(lost) from samples_1m") == 600
+    assert count(p, "select sum(sent) from samples_1m") == 7200 + 600     # each second once, the outage included
+
+
+def test_a_clock_reset_far_back_does_not_recompute_minutes_whose_seconds_are_gone(tmp_path):
+    """Seconds kept around an old incident start mid-minute: recomputing that minute from them would shrink it."""
+    rows = [SampleRow(NOW - 10 * DAY + i * 10_000, "line_hb", "p", 1, 1, 0) for i in range(10 * 8640)]
+    inc = NOW - 9 * DAY + 30_000                                            # its ±10 min edges fall mid-minute
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", rows, [(inc, inc + 60_000)])
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))      # rolls 10 days, deletes the oldest 3
+        await s.run_start(NOW - 30 * DAY, "t", {})                          # a board that booted a month in the past
+        await housekeep(s, NOW - 30 * DAY + 60_000, free_bytes=lambda: (10**12, 10**12))
+        await housekeep(s, NOW + 600_000, free_bytes=lambda: (10**12, 10**12))
+        await s.close()
+    run(main())
+    assert count(tmp_path / "w.db", "select sum(sent) from samples_1m") == 10 * 8640   # every minute still whole

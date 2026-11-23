@@ -133,10 +133,13 @@ export function parseIncident(r) {
   const tags = r.tags_json ? JSON.parse(r.tags_json) : { segments: r.segments || [], tags: r.tags || [], point: r.point };
   const ev = r.evidence_json ? JSON.parse(r.evidence_json) : (r.evidence || {});
   const start = startMs(r), end = endMs(r);
-  const segs = [...new Set((tags.segments || []).map(segWord))];
+  const home = ev.cause_where === "home";   // in-home queueing: the line timed out, but the delay is at home
+  const segs = home ? [t("seg.home")] : [...new Set((tags.segments || []).map(segWord))];
+  const rule = r.cause_final || r.primary_cause || r.cause;
   return { id: r.id, start, end, open: end == null, segs, raw: tags.segments || [], point: tags.point, tags: tags.tags || [],
+           home, slow: String(rule || "").startsWith("R7"),   // queueing slows a path down; it doesn't cut it
            chain: tags.chain || [], label: cause(ev.label || ""), next: cause(ev.next_step || ""), protocol: ev.protocol || "",
-           rule: r.cause_final || r.primary_cause || r.cause, final: r.cause_final != null || r.final,
+           rule, final: r.cause_final != null || r.final,
            changed: !!r.cause_changed, provisional: ev.provisional, evidence: ev };
 }
 

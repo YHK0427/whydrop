@@ -269,47 +269,44 @@ def test_selfcheck_covers_tcp_for_every_tcp_probed_class(fakes):
 SECRET = "s" * 40
 
 
-async def _reflector(secret=SECRET, port=0):
+async def _reflector(secret=SECRET):
     from whydrop.reflector.replay import Tombstones
     from whydrop.reflector.tcp import TcpReflector, serve_tcp
     from whydrop.reflector.udp import UdpReflector, serve_udp
-    u = await serve_udp(UdpReflector(secret.encode(), epoch=3, tombstones=Tombstones(None)), "127.0.0.1", port)
-    t = await serve_tcp(TcpReflector(secret.encode(), epoch=3), "127.0.0.1", u.port)
-    return u, t
+    for _ in range(20):   # one number for both: TCP first, since Windows reserves TCP blocks inside the UDP range
+        t = await serve_tcp(TcpReflector(secret.encode(), epoch=3), "127.0.0.1", 0)
+        try:
+            port = t.sockets[0].getsockname()[1]
+            return await serve_udp(UdpReflector(secret.encode(), epoch=3, tombstones=Tombstones(None)), "127.0.0.1", port), t
+        except OSError:   # that UDP port is in use
+            t.close()
+    raise OSError("no port free for both UDP and TCP")
 
 
-def precision_cfg(tmp_path, monkeypatch, port):
+def precision_cfg(tmp_path, monkeypatch, port=9):   # with a reflector, run_with puts the port it really got
     monkeypatch.setenv("WHYDROP_SECRET", SECRET)
     return load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "w.db"), "WHYDROP_REFLECTOR": f"127.0.0.1:{port}"})
 
 
 def run_with(cfg, seconds, reflector_secret=SECRET, with_reflector=True):
     async def go():
-        port = int(cfg.reflector.rsplit(":", 1)[1])
-        servers = await _reflector(reflector_secret, port) if with_reflector else None
+        from dataclasses import replace
+        servers = await _reflector(reflector_secret) if with_reflector else None   # held open: no port reused later
+        run_cfg = replace(cfg, reflector=f"127.0.0.1:{servers[0].port}") if servers else cfg
         stop = asyncio.Event()
-        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        task = asyncio.create_task(runmod.run_agent(run_cfg, stop=stop))
         await asyncio.sleep(seconds)
         stop.set()
         await asyncio.wait_for(task, 10)
         if servers:
             await servers[0].close()
             servers[1].close()
-        return port
     return asyncio.run(go())
 
 
 def test_precision_e2e(fakes, monkeypatch, tmp_path):
     import sys
-
-    async def port():
-        u, t = await _reflector()
-        p = u.port
-        await u.close()
-        t.close()
-        return p
-    p = asyncio.run(port())
-    cfg = precision_cfg(tmp_path, monkeypatch, p)
+    cfg = precision_cfg(tmp_path, monkeypatch)
     run_with(cfg, 5.0)
     [(sent, ok, lost)] = db(cfg, "select sum(sent), sum(ok), sum(lost) from samples_1s where probe = 'udp_stream'")
     assert 30 <= sent <= 55 and lost == 0 and ok == sent
@@ -334,14 +331,7 @@ def test_reflector_down_is_precision_degraded_not_incident(fakes, monkeypatch, t
 
 def test_wrong_secret_is_secret_mismatch(fakes, monkeypatch, tmp_path):
     monkeypatch.setattr(runmod, "PRECISION_EVERY_S", 0.3)
-
-    async def port():
-        u, t = await _reflector()
-        p = u.port
-        await u.close()
-        t.close()
-        return p
-    cfg = precision_cfg(tmp_path, monkeypatch, asyncio.run(port()))
+    cfg = precision_cfg(tmp_path, monkeypatch)
     run_with(cfg, 2.0, reflector_secret="z" * 40)
     assert "secret_mismatch" in [k for (k,) in db(cfg, "select kind from findings")]
 

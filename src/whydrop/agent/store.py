@@ -219,6 +219,14 @@ class Store:
                 return self._con.execute(sql, params).rowcount
         return await self._db(ex)
 
+    async def execute_atomic(self, statements: list[tuple[str, tuple]]) -> None:
+        """Several writes in one transaction: all of them land, or none."""
+        def ex():
+            with self._con:
+                for sql, params in statements:
+                    self._con.execute(sql, params)
+        await self._db(ex)
+
     async def meta_get(self, key: str) -> str | None:
         rows = await self.execute("SELECT value FROM meta WHERE key=?", (key,))
         return rows[0][0] if rows else None

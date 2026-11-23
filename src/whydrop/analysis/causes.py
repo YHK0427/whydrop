@@ -113,7 +113,7 @@ def classify(inc: Incident, frames, cond, ctx: Context) -> Cause:
     queued, at_home = _queueing(inc, frames, cond, ctx)
     if queued and segs & {"lan", "line"}:
         if at_home:
-            c = _cause("R7", texts.IN_HOME_QUEUEING)
+            c = _cause("R7", texts.IN_HOME_QUEUEING, evidence={"where": "home"})   # the line timed out; the delay is at home
             c.next_step = texts.IN_HOME_STEP
             return c
         return _cause("R7", texts.QUEUEING_TIMEOUTS)

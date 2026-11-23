@@ -136,3 +136,22 @@ def test_public_summary_has_no_absolute_time_or_address(db):
     iid = c.get("/api/incidents").json()[0]["id"]
     t = c.get(f"/api/incidents/{iid}/summary?public=1").text
     assert "min ago" in t and not re.search(r"\d{4}-\d{2}-\d{2}", t) and "192.168.0.1" not in t and "203.0.113" not in t
+
+
+def test_in_home_summary_names_the_home_network(tmp_path):
+    path = tmp_path / "w.db"
+
+    async def go():
+        s = Store(path)
+        await s.open()
+        await s.insert("incidents", start_ms=NOW - 9_000, end_ms=NOW - 1_000, primary_cause="R7", cause_final="R7",
+                       tags_json=json.dumps({"tags": [], "segments": ["line"], "chain": [], "point": None}),
+                       evidence_json=json.dumps({"label": "In-home queueing (likely)", "cause": "R7",
+                                                 "cause_where": "home"}))
+        await s.close()
+    asyncio.run(go())
+    c = client(path)
+    iid = c.get("/api/incidents").json()[0]["id"]
+    assert "8 s, Home network" in c.get(f"/api/incidents/{iid}/summary").text
+    assert "8초, 집 안 네트워크" in c.get(f"/api/incidents/{iid}/summary?lang=ko").text
+    assert c.get(f"/api/incidents/{iid}?public=1").json()["evidence"]["cause_where"] == "home"   # the demo needs it too

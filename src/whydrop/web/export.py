@@ -16,9 +16,9 @@ TABLES = {"incidents": "incidents", "conditions": "conditions", "samples_1m": "s
 KIND = {"incidents": "incident", "conditions": "condition", "samples_1m": "sample", "events": "event"}
 BUG_WINDOW_MS = 10 * 60_000
 
-SEGMENT_WORDS = {"en": {"line": "Internet line", "lan": "Router", "wifi": "Wi-Fi", "link": "Cable", "host_net": "This device",
+SEGMENT_WORDS = {"en": {"home": "Home network", "line": "Internet line", "lan": "Router", "wifi": "Wi-Fi", "link": "Cable", "host_net": "This device",
                         "dns_router": "DNS", "dns_isp": "DNS", "dns_public": "DNS"},
-                 "ko": {"line": "인터넷 회선", "lan": "공유기", "wifi": "와이파이", "link": "유선", "host_net": "이 기기",
+                 "ko": {"home": "집 안 네트워크", "line": "인터넷 회선", "lan": "공유기", "wifi": "와이파이", "link": "유선", "host_net": "이 기기",
                         "dns_router": "DNS", "dns_isp": "DNS", "dns_public": "DNS"}}
 
 
@@ -65,7 +65,8 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: i
     words = SEGMENT_WORDS.get(lang, SEGMENT_WORDS["en"])
     start = datetime.fromtimestamp(inc["start_ms"] / 1000, timezone.utc).astimezone()
     dur = ((inc["end_ms"] or inc["start_ms"]) - inc["start_ms"]) / 1000
-    where = ", ".join(dict.fromkeys(words.get(s, s) for s in tags.get("segments", []))) or tags.get("point") or "-"
+    from whydrop.web.public import shown_segments
+    where = ", ".join(dict.fromkeys(words.get(s, s) for s in shown_segments(tags.get("segments", []), ev)))         or tags.get("point") or "-"
     when = start.strftime("%Y-%m-%d %H:%M:%S %z")
     if public_view:   # no absolute time or address in the public view
         from whydrop.web.public import mask_text

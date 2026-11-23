@@ -121,6 +121,7 @@ def test_late_replies_with_a_slow_router_are_in_home_queueing():
     [h] = run(blip)[1]                                                          # one slow router reply is not enough
     assert h.cause.label == texts.QUEUEING_TIMEOUTS
     assert g.cause.label == texts.QUEUEING_TIMEOUTS
+    assert f.cause.evidence.get("where") == "home" and "where" not in g.cause.evidence   # the UI draws it there
 
 
 def test_router_checks_timing_out_during_a_late_reply_drop_are_in_home_queueing():
