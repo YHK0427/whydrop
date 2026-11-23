@@ -34,24 +34,41 @@ def pick_step(from_ms: int, to_ms: int, step: int | None, cap: int = MAX_POINTS)
     return max(step, floor) if step in STEPS else floor
 
 
+_COLS = "ts_ms, probe, pair, sent, ok, lost, lost_up, lost_down, lost_dir_unknown, late, local_fail, rtt_min, rtt_avg, rtt_max, rtt_p95"
+
+
+def _source(con, from_ms: int, to_ms: int, step: int, now_ms: int) -> tuple[str, list, int, str]:
+    """Where a range's rows come from: 1 s rows for fine steps in the last 7 days; otherwise minute rows up to the
+    rollup point and 1 s rows after it, so each second is counted once and the last minutes aren't missing."""
+    if from_ms > now_ms - ONE_S_KEPT_MS and step < 60:
+        return "samples_1s WHERE agent_id = 1 AND ts_ms >= ? AND ts_ms < ?", [from_ms, to_ms], step, "samples_1s"
+    from_ms = from_ms // 60_000 * 60_000   # a minute row stands for its whole minute: whole minutes at both ends
+    to_ms = -(-to_ms // 60_000) * 60_000
+    r = con.execute("SELECT value FROM meta WHERE key = 'rollup_until'").fetchone()
+    split = min(max(int(r[0]) if r else 0, from_ms), to_ms)
+    return (f"(SELECT {_COLS} FROM samples_1m WHERE agent_id = 1 AND ts_ms >= ? AND ts_ms < ? UNION ALL "   # the key's prefix
+            f"SELECT {_COLS} FROM samples_1s WHERE agent_id = 1 AND ts_ms >= ? AND ts_ms < ?) WHERE 1",
+            [from_ms, split, split, to_ms], max(step, 60), "samples_1m")
+
+
 def samples(db, from_ms: int, to_ms: int, step: int | None, probe: str | None = None, now_ms: int | None = None) -> dict:
     import time
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     step = pick_step(from_ms, to_ms, step, CHART_POINTS // 4)   # per pair: keep the answer small (the UI uses /api/chart)
-    table = "samples_1s" if from_ms > now_ms - ONE_S_KEPT_MS and step < 60 else "samples_1m"  # 1 s rows live 7 days
-    if table == "samples_1m":
-        step = max(step, 60)
-    where, params = "ts_ms >= ? AND ts_ms < ?", [from_ms, to_ms]
-    if probe:
-        where += " AND probe = ?"
-        params.append(probe)
-    sql = (f"SELECT (ts_ms / {step * 1000}) * {step * 1000} AS ts_ms, probe, pair, SUM(sent) sent, SUM(ok) ok, "
-           "SUM(lost) lost, SUM(lost_up) lost_up, SUM(lost_down) lost_down, SUM(lost_dir_unknown) lost_dir_unknown, "
-           "SUM(late) late, SUM(local_fail) local_fail, MIN(rtt_min) rtt_min, "
-           "SUM(rtt_avg * ok) / NULLIF(SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END), 0) rtt_avg, "
-           f"MAX(rtt_max) rtt_max, MAX(rtt_p95) rtt_p95 FROM {table} WHERE {where} "
-           "GROUP BY 1, probe, pair ORDER BY 1")
-    return {"step_s": step, "table": table, "rows": rows(db, sql, params)}
+    if db is None or not Path(db).exists():
+        return {"step_s": step if from_ms > now_ms - ONE_S_KEPT_MS else max(step, 60), "table": None, "rows": []}
+    with closing(connect(db)) as con:
+        src, params, step, table = _source(con, from_ms, to_ms, step, now_ms)
+        if probe:
+            src += " AND probe = ?"
+            params.append(probe)
+        sql = (f"SELECT (ts_ms / {step * 1000}) * {step * 1000} AS ts_ms, probe, pair, SUM(sent) sent, SUM(ok) ok, "
+               "SUM(lost) lost, SUM(lost_up) lost_up, SUM(lost_down) lost_down, SUM(lost_dir_unknown) lost_dir_unknown, "
+               "SUM(late) late, SUM(local_fail) local_fail, MIN(rtt_min) rtt_min, "
+               "SUM(rtt_avg * ok) / NULLIF(SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END), 0) rtt_avg, "
+               f"MAX(rtt_max) rtt_max, MAX(rtt_p95) rtt_p95 FROM {src} "
+               "GROUP BY 1, probe, pair ORDER BY 1")
+        return {"step_s": step, "table": table, "rows": [dict(r) for r in con.execute(sql, params)]}
 
 
 def ranged(db, table: str, from_ms: int, to_ms: int, ts: str = "ts_ms", extra: str = "", params=(), limit=5000):
@@ -118,17 +135,16 @@ def chart(db, from_ms: int, to_ms: int, step: int | None, now_ms: int | None = N
     import time
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
     step = pick_step(from_ms, to_ms, step, CHART_POINTS)
-    table = "samples_1s" if from_ms > now_ms - ONE_S_KEPT_MS and step < 60 else "samples_1m"
-    if table == "samples_1m":
-        step = max(step, 60)
+    table = None
     marks = ",".join("?" * len(CHART_PROBES))
-    sql = (f"SELECT (ts_ms / {step * 1000}) AS b, probe, SUM(sent), SUM(ok), SUM(lost), SUM(lost_up), SUM(lost_down), "
-           "SUM(rtt_avg * ok), SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END) "
-           f"FROM {table} WHERE ts_ms >= ? AND ts_ms < ? AND probe IN ({marks}) GROUP BY b, probe ORDER BY b")
     by: dict[int, dict] = {}
     if db is not None and Path(db).exists():
         with closing(connect(db)) as con:
-            for b, probe, sent, ok, lost, up, down, rtt_sum, rtt_n in con.execute(sql, (from_ms, to_ms, *CHART_PROBES)):
+            src, params, step, table = _source(con, from_ms, to_ms, step, now_ms)
+            sql = (f"SELECT (ts_ms / {step * 1000}) AS b, probe, SUM(sent), SUM(ok), SUM(lost), SUM(lost_up), "
+                   "SUM(lost_down), SUM(rtt_avg * ok), SUM(CASE WHEN rtt_avg IS NULL THEN 0 ELSE ok END) "
+                   f"FROM {src} AND probe IN ({marks}) GROUP BY b, probe ORDER BY b")
+            for b, probe, sent, ok, lost, up, down, rtt_sum, rtt_n in con.execute(sql, (*params, *CHART_PROBES)):
                 d = by.setdefault(b * step, {"up": 0, "down": 0, "lost": 0, "rs": 0.0, "rn": 0, "cs": 0, "co": 0})
                 if probe == "udp_stream":
                     d["up"] += up or 0
