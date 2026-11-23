@@ -200,3 +200,31 @@ def test_point_event_drop_page_has_no_null_and_no_repeated_evidence(browser, bas
     text = page.inner_text("main")
     ctx.close()
     assert "null" not in text and "cause_interval_s" not in text, text[-600:]
+
+
+@pytest.mark.parametrize("lang,words", [("en", "Home network slowed down for"), ("ko", "집 안 네트워크가")])
+def test_in_home_verdict_draws_the_break_before_the_router(browser, base, lang, words):
+    """Demo incident 38: the verdict was in-home queueing, but the headline said the internet line dropped and the
+    path drew the line cut. The delay is before the router, and it is slowness, not a cut."""
+    import json as _json
+
+    def in_home(route):
+        body = _json.loads(route.fetch().text())
+        body.update(primary_cause="R7", cause_final="R7",
+                    tags_json=_json.dumps({"segments": ["line"], "tags": [], "chain": [], "point": None}),
+                    evidence_json=_json.dumps({"label": "In-home queueing (likely)", "cause": "R7", "cause_where": "home"}))
+        route.fulfill(content_type="application/json", body=_json.dumps(body))
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    ctx.add_init_script(f"localStorage.setItem('whydrop.lang','{lang}')")
+    page = ctx.new_page()
+    page.route(re.compile(r".*/api/incidents/1(\?.*)?$"), in_home)
+    page.goto(f"{base}/#/drop/1")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+    head = page.inner_text("h1.headline")
+    nodes = page.eval_on_selector_all("main svg g.node", "gs => gs.map(g => [g.getAttribute('aria-label'), g.getAttribute('class')])")
+    broken = page.locator("main svg .cable.broken").count()
+    ctx.close()
+    assert words in head, head
+    assert broken == 0, nodes
+    assert [c.strip() for _, c in nodes] == ["node", "node warn", "node", "node", "node"], nodes   # Wi-Fi is the hop

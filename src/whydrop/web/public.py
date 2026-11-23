@@ -24,7 +24,18 @@ EVENT_DETAIL = {   # kind → detail keys that are safe to show
     "version_mismatch": set(), "cpu_throttle": {"nr_throttled"}, "reflector_restart": set(),
 }
 INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "events", "provisional",
-                     "cause_direction", "cause_lost_up", "cause_lost_down", "cause_classes", "interval_s"}
+                     "cause_direction", "cause_lost_up", "cause_lost_down", "cause_classes", "interval_s", "cause_where"}
+
+
+def shown_segments(segments, evidence: dict) -> list:
+    """Where a drop is, as the verdict places it: in-home queueing timed the line out, but the delay is at home."""
+    return ["home"] if evidence.get("cause_where") == "home" else list(segments)
+
+
+def slowed(rule) -> bool:
+    return str(rule or "").startswith("R7")   # queueing slows a path down; it doesn't cut it
+
+
 STATUS = {"version", "mode", "baseline", "segments", "signal_dbm", "link", "vpn", "analysis_lag_s", "public"}
 
 

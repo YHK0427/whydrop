@@ -17,7 +17,7 @@ function statusSentence(st, open, rough) {
   if (Object.values(segs).every(s => s === "checking")) return t("status.checking");
   if (open) {
     const secs = Math.max(0, Math.round((Date.now() - open.start) / 1000));
-    return t("status.down", { seg: open.segs[0] || t("seg.line"), secs });
+    return t(open.slow ? "status.slow" : "status.down", { seg: open.segs[0] || t("seg.line"), secs });
   }
   if (rough) {
     const d = rough.detail_json ? JSON.parse(rough.detail_json) : (rough.detail || {});

@@ -82,7 +82,7 @@ In priority order; windows are anchored on the incident start unless a rule says
 | R7 | High latency (queueing) | labels a latency rough patch; also the primary cause of a router or line drop under the queueing-first rule below | Enable SQM (cake/fq_codel) on the router, or limit uploads |
 | — | Unknown | none of the above | File a "wrong diagnosis" issue with the bug report attached |
 
-**Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too (either way), "in-home queueing", whose next step points at the Wi-Fi and other devices at home instead of SQM.
+**Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too (either way), "in-home queueing", whose next step points at the Wi-Fi and other devices at home instead of SQM. R7 is shown as the path slowing down, not dropping; for in-home queueing the dashboard, alerts and summary name the home network and mark the Wi-Fi or cable hop.
 
 Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot seen over Wi-Fi → one incident, R1a, with the WAN coming back later joining it as "router restart (likely)". A saturated uplink → R7.
 
@@ -102,7 +102,7 @@ To report a vulnerability, see [SECURITY](../SECURITY.md).
 
 SQLite in WAL mode, committing every 5 s (less wear on SD cards).
 
-- 1-second aggregates are kept 7 days, then rolled up into 1-minute aggregates.
+- 1-second aggregates are kept 7 days. They are also rolled up into 1-minute aggregates as they come in, 5 minutes behind (so late replies are counted first); the 6 h, 24 h and 7 d views read those minutes plus the 1-second rows since the last rollup.
 - The 1-second data within ±10 min of an incident, and its packet strip (±60 s), are kept 90 days.
 - When free space drops below min(2 GB, 5 % of the volume), writing stops and the log says so (`storage.min_free_mb` overrides the threshold).
 - `whydrop replay` re-runs the analysis over the 1-second aggregates and events, so it covers about the last 7 days, and prints the incidents; it never writes to the database. Its results are approximate.

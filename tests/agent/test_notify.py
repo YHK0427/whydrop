@@ -97,3 +97,15 @@ def test_no_url_means_no_alerts():
     n = Notifier({}, now_ms=lambda: 0)
     asyncio.run(n.handle(finalized()))
     assert n.queue == [] and not n.enabled
+
+
+def test_in_home_queueing_alert_names_the_home_network_and_says_slowed():
+    """Seen on the demo's incident 38: an in-home queueing verdict was sent as 'Internet line dropped'."""
+    from whydrop.agent.notify import text
+    row = {**ROW, "primary_cause": "R7", "cause_final": "R7",
+           "evidence_json": json.dumps({"label": "In-home queueing (likely)", "cause": "R7", "cause_where": "home"})}
+    title, sentence = text(row, ROW["end_ms"])
+    assert title == "whydrop: Home network slowed down"
+    assert sentence.startswith("Home network slowed down for 46 s. In-home queueing (likely).")
+    r7 = {**row, "evidence_json": json.dumps({"label": "Queueing caused the timeouts (likely)", "cause": "R7"})}
+    assert text(r7, ROW["end_ms"])[1].startswith("Internet line slowed down for 46 s.")   # queueing past the router
