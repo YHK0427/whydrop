@@ -1,5 +1,5 @@
 # python:3.12-slim (Debian trixie), pinned by digest; iw pinned to the trixie version the Wi-Fi parser is tested against (a glob: arm64 ships the binNMU 6.9-1+b1)
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 ARG IW_VERSION=6.9-1*
 RUN apt-get update \
