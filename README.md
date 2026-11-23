@@ -6,7 +6,7 @@
 
 whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **likely cause**, and what TCP and UDP did meanwhile.
 
-[![The live demo: the path, the verdict for an 8-second line drop, and its ±60 s packet timeline](https://raw.githubusercontent.com/YHK0427/whydrop/main/docs/media/demo.gif)](https://yhk0427.github.io/whydrop/)
+[![The live demo: the path, the verdict for an 8-second drop, and its ±60 s packet timeline](https://raw.githubusercontent.com/YHK0427/whydrop/main/docs/media/demo.gif)](https://yhk0427.github.io/whydrop/)
 
 Three verdicts, worded as its alerts word them (durations made up):
 
