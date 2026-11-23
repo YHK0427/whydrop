@@ -6,6 +6,24 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11,<3.14"
 dependencies = []
+keywords = ["network", "monitoring", "packet-loss", "nat", "wifi", "isp", "self-hosted", "homelab"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Networking :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/YHK0427/whydrop"
+Demo = "https://yhk0427.github.io/whydrop/"
+Changelog = "https://github.com/YHK0427/whydrop/blob/main/CHANGELOG.md"
+Issues = "https://github.com/YHK0427/whydrop/issues"
 
 [project.scripts]
 whydrop = "whydrop.cli:main"
@@ -30,6 +48,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whydrop"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["demo", "docs/media"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
