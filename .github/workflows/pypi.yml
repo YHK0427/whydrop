@@ -1,0 +1,28 @@
+name: pypi
+# Publish the package to PyPI with trusted publishing (no token stored). Manual only: run it once the PyPI project
+# has a trusted publisher for this repository and workflow (environment "pypi").
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'   # PyPI's trusted publisher doesn't pin a branch
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/whydrop/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+      - name: the built version is the one whydrop reports
+        run: |
+          uv build -o dist
+          v=$(uv run --no-dev whydrop --version)
+          ls dist | grep -q "whydrop-${v#whydrop }-py3-none-any.whl"
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

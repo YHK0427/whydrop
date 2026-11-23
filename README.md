@@ -1,4 +1,4 @@
-**English** | [한국어](README.ko.md)
+**English** | [한국어](https://github.com/YHK0427/whydrop/blob/main/README.ko.md)
 
 # Is it your Wi-Fi, your router, or your ISP — and what happened to the packets?
 
@@ -6,7 +6,7 @@
 
 whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **likely cause**, and what TCP and UDP did meanwhile.
 
-[![The live demo: the path, the verdict for an 8-second line drop, and its ±60 s packet timeline](docs/media/demo.gif)](https://yhk0427.github.io/whydrop/)
+[![The live demo: the path, the verdict for an 8-second line drop, and its ±60 s packet timeline](https://raw.githubusercontent.com/YHK0427/whydrop/main/docs/media/demo.gif)](https://yhk0427.github.io/whydrop/)
 
 Three verdicts, worded as its alerts word them (durations made up):
 
@@ -34,12 +34,12 @@ That's basic mode: no account, no server, nothing to configure. Run it on a mach
 ## What it tells you
 
 - **Where it broke**, hop by hop: *this device → Wi-Fi or cable → router → internet line → DNS*. The dashboard draws that path as a cable that visibly breaks at the failing hop.
-- **The likely cause**, from rules you can read in [docs/design](docs/design.md): Wi-Fi problem, wired link, the host's own network config, router, public IP change, NAT state lost or reset, DNS (router, ISP, public resolvers blocked, or all of them), a line drop in the ISP segment, a lossy line, or queueing. Every verdict says *likely*: whydrop infers, it doesn't know.
+- **The likely cause**, from rules you can read in [docs/design](https://github.com/YHK0427/whydrop/blob/main/docs/design.md): Wi-Fi problem, wired link, the host's own network config, router, public IP change, NAT state lost or reset, DNS (router, ISP, public resolvers blocked, or all of them), a line drop in the ISP segment, a lossy line, or queueing. Every verdict says *likely*: whydrop infers, it doesn't know.
 - **What to do next**, in one sentence per cause.
 - **Rough patches** that aren't outages: packet loss, high latency from queueing, weak Wi-Fi signal, loss between Wi-Fi and the router.
 - **Evidence you can hand over**: a plain-text summary for a support chat, CSV/JSON exports, a card image, and a public-view bug report with addresses removed.
 
-How the decisions are made — quorum across independent providers, a gate so random loss isn't called an outage, an 80-second settle before a cause is final — is in [docs/how-it-works](docs/how-it-works.md).
+How the decisions are made — quorum across independent providers, a gate so random loss isn't called an outage, an 80-second settle before a cause is final — is in [docs/how-it-works](https://github.com/YHK0427/whydrop/blob/main/docs/how-it-works.md).
 
 ## Precision mode
 
@@ -49,7 +49,7 @@ Basic mode can only see "a reply came back or it didn't". With a **reflector** �
 - **A hot TCP connection** with a heartbeat every second. During a drop you see what TCP itself did: stalls, retransmissions with the RTO doubling, resets, reconnects (from the kernel's `TCP_INFO` on Linux).
 - **An idle TCP connection** that stays silent for minutes, to catch a NAT or firewall that silently forgets connections.
 
-Both ends share a secret (`WHYDROP_SECRET`); every packet carries an HMAC, and the reflector never answers anything it can't verify. Setup: [docs/deploy-reflector](docs/deploy-reflector.md). Wire format: [docs/protocol](docs/protocol.md).
+Both ends share a secret (`WHYDROP_SECRET`); every packet carries an HMAC, and the reflector never answers anything it can't verify. Setup: [docs/deploy-reflector](https://github.com/YHK0427/whydrop/blob/main/docs/deploy-reflector.md). Wire format: [docs/protocol](https://github.com/YHK0427/whydrop/blob/main/docs/protocol.md).
 
 ## nat-test
 
@@ -61,7 +61,7 @@ Measures how long the NAT and firewalls on your path keep an idle UDP mapping (1
 
 ## Configuration
 
-Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](whydrop.example.toml) documents every key; [`.env.example`](.env.example) the environment. Alerts and most tuning live only in `whydrop.toml`: with Docker, put it next to `compose.yaml` and add `- ./whydrop.toml:/app/whydrop.toml:ro` under `volumes:`.
+Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](https://github.com/YHK0427/whydrop/blob/main/whydrop.example.toml) documents every key; [`.env.example`](https://github.com/YHK0427/whydrop/blob/main/.env.example) the environment. Alerts and most tuning live only in `whydrop.toml`: with Docker, put it next to `compose.yaml` and add `- ./whydrop.toml:/app/whydrop.toml:ro` under `volumes:`.
 
 | Variable | What it does |
 |---|---|
@@ -130,7 +130,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 
 ## How this was built
 
-whydrop was written with an AI agent (Claude) under a human's direction: test-first, with independent AI reviewers before every merge and real measurements on a real network. What the agent did, what the human decided, and what the reviews caught is logged in [docs/ai-process](docs/ai-process.md).
+whydrop was written with an AI agent (Claude) under a human's direction: test-first, with independent AI reviewers before every merge and real measurements on a real network. What the agent did, what the human decided, and what the reviews caught is logged in [docs/ai-process](https://github.com/YHK0427/whydrop/blob/main/docs/ai-process.md).
 
 ## License
 
