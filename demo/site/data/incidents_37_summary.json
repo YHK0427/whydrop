@@ -1,0 +1,1 @@
+"Drop: 59 min ago, 0 s, idle_state_lost\nLikely cause: NAT/firewall state expired (likely)\nWhat to do next: The idle interval is longer than the measured NAT timeout: set keepalive below it\nIn protocol terms: TCP: the kernel retransmitted 0 times (RTO 0.218 → 0.22 s); no RST, so the connection survived.\nRecorded by whydrop (rule R5)"
