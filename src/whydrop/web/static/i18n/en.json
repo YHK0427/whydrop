@@ -125,6 +125,8 @@
   "proto.pause": "Pause",
   "proto.resume": "Resume",
   "proto.none": "No packets yet. The packet view fills in once precision mode is on.",
+  "proto.static": "The public demo has no real packets. Their format is in the protocol document, with a Wireshark dissector in the repository.",
+  "proto.doc": "Protocol document",
   "proto.col.time": "Time",
   "proto.col.dir": "Direction",
   "proto.col.type": "Type",

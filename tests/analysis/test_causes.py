@@ -1,3 +1,5 @@
+import re
+
 from scen import T0, Scenario
 from whydrop.agent.events import Event
 from whydrop.analysis import texts
@@ -163,6 +165,9 @@ def test_protocol_paragraph_example():
     closed, finals, frames, _ = run(s)
     text = protocol_paragraph(closed[0])
     assert "seq 1201–1660" in text and "all lost upstream" in text and "0.2 → 3.2 s" in text and "no RST" in text
+    ko = protocol_paragraph(closed[0], "ko")   # the Korean page showed the English one
+    assert "seq 1201–1660" in ko and "모두 올라가는 길에서" in ko and "0.2 → 3.2초" in ko and "RST가 없어" in ko, ko
+    assert not re.search(r"[A-Za-z]{4,} [a-z]{3,}", ko), ko
 
 
 def test_download_only_outage_direction():

@@ -31,7 +31,8 @@ function chart(byProto) {   // step lines of survival vs delay, log x axis, dire
     for (const r of pts) root.append(svg("circle", { cx: lx(r.delay_s), cy: r.alive == null ? (ly(1) + ly(0)) / 2 : ly(r.alive), r: 5,
       fill: r.alive == null ? "var(--surface)" : color, stroke: color, "stroke-width": 2 }));
     const last = pts[pts.length - 1];
-    if (last) root.append(svg("text", { x: lx(last.delay_s) + 10, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + 4,
+    const off = proto === "udp" ? -9 : 19;   // UDP above its line, TCP below: both often end on "forgotten", one past the other
+    if (last) root.append(svg("text", { x: lx(last.delay_s) + 6, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + off,
       fill: "var(--ink)", "font-size": 13, "font-weight": 600 }, proto.toUpperCase()));
   }
   return root;

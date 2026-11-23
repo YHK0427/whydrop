@@ -95,7 +95,7 @@ export async function mount(main, { id, refresh }) {
       t("drop.wrong")));
 
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);   // cause_X repeats the incident's own X
-  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "events", "cause_where"].includes(k)
+  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "protocol_ko", "events", "cause_where"].includes(k)
     && !(k.startsWith("cause_") && same(d.evidence[k.slice(6)], v)));
   const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });

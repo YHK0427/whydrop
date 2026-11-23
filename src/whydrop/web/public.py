@@ -23,7 +23,7 @@ EVENT_DETAIL = {   # kind → detail keys that are safe to show
     "net_change": {"gateway_changed", "vpn"}, "middlebox": {"flag"}, "auth_fail": set(), "busy": set(),
     "version_mismatch": set(), "cpu_throttle": {"nr_throttled"}, "reflector_restart": set(),
 }
-INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "events", "provisional",
+INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "protocol_ko", "events", "provisional",
                      "cause_direction", "cause_lost_up", "cause_lost_down", "cause_classes", "interval_s", "cause_where"}
 
 

@@ -1,6 +1,6 @@
 // Protocol (#/protocol): recent WD/WT packets as hex with each field named as in docs/protocol (UI design doc §5.4).
 import { live } from "../app.js";
-import { api, clock, h, t, tsMs } from "../lib.js";
+import { STATIC, api, clock, h, lang, t, tsMs } from "../lib.js";
 
 // WD (44 B): !2sBBIIQIIII + hmac8 — field names as in docs/protocol
 const WD = [["magic", 2], ["version", 1], ["type", 1], ["session_id", 4], ["seq", 4], ["t_send_ns", 8], ["recv_count", 4],
@@ -20,6 +20,12 @@ function hexdump(hex) {
 }
 
 export async function mount(main) {
+  if (STATIC) {   // the demo is a snapshot of incidents: no packet capture in it, so no table and nothing to pause
+    const doc = `https://github.com/YHK0427/whydrop/blob/main/docs/protocol${lang === "ko" ? ".ko" : ""}.md`;
+    main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("proto.title")),
+      h("p", {}, t("proto.static"), " ", h("a", { href: doc, target: "_blank", rel: "noopener noreferrer" }, t("proto.doc")))));
+    return () => {};
+  }
   const cleanup = [];   // this mount's own: a later mount of the same page never shares it
   let packets = await api("/api/packets").catch(() => []);
   const body = h("tbody"), detail = h("div");

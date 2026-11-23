@@ -200,8 +200,27 @@ class Settler:
         return out
 
 
-def protocol_paragraph(inc: Incident) -> str:
+_PROTO = {   # the "In protocol terms" panel in both dashboard languages; the codes stay as they are on the wire
+    "en": {"unknown": "direction unknown (the reflector restarted)", "all_up": "all lost upstream",
+           "all_down": "all lost downstream", "up_only": "{up} lost upstream; downstream not measurable",
+           "both": "{up} lost upstream, {down} downstream",
+           "udp": "UDP: sent seq {a}–{b}; reflector recv_count +{got} → {what}.",
+           "stall": "HB got no reply", "retrans": "the kernel retransmitted {n} times (RTO {lo:g} → {hi:g} s)",
+           "rst": "an RST ended the connection", "no_rst": "no RST, so the connection survived",
+           "ack": "the first HB_ACK came after {s} s of silence", "tcp": "TCP: {items}.", "sep": "; "},
+    "ko": {"unknown": "방향은 알 수 없어요(reflector가 재시작했어요)", "all_up": "모두 올라가는 길에서 사라졌어요",
+           "all_down": "모두 내려오는 길에서 사라졌어요", "up_only": "올라가는 길에서 {up}개가 사라졌고, 내려오는 쪽은 잴 수 없었어요",
+           "both": "올라가는 길에서 {up}개, 내려오는 길에서 {down}개가 사라졌어요",
+           "udp": "UDP: seq {a}–{b} 전송, reflector의 recv_count +{got} → {what}.",
+           "stall": "HB에 응답이 없었어요", "retrans": "커널이 {n}번 재전송했어요(RTO {lo:g} → {hi:g}초)",
+           "rst": "RST로 연결이 끊겼어요", "no_rst": "RST가 없어 연결은 살아 있었어요",
+           "ack": "{s}초 동안 조용하다가 첫 HB_ACK가 왔어요", "tcp": "TCP: {items}.", "sep": ". "},
+}
+
+
+def protocol_paragraph(inc: Incident, lang: str = "en") -> str:
     """The "In protocol terms" panel: a paragraph built only from recorded evidence."""
+    w = _PROTO[lang]
     parts = []
     for e in inc.events:
         if e.kind != "udp_outage":
@@ -211,29 +230,29 @@ def protocol_paragraph(inc: Incident) -> str:
         gap = (b - a - 1) if a is not None and b is not None else None   # seqs between the ECHO before and after
         up, down, status = d.get("lost_up"), d.get("lost_down"), d.get("status")
         if status == "unknown" or up is None:
-            what = "direction unknown (the reflector restarted)"
+            what = w["unknown"]
         elif up == gap:
-            what = "all lost upstream"
+            what = w["all_up"]
         elif status == "ok" and down == gap and not up:
-            what = "all lost downstream"
+            what = w["all_down"]
         elif down is None:
-            what = f"{up} lost upstream; downstream not measurable"
+            what = w["up_only"].format(up=up)
         else:
-            what = f"{up} lost upstream, {down} downstream"
+            what = w["both"].format(up=up, down=down)
         got = gap - up if gap is not None and up is not None else 0          # reached the reflector in the gap
-        parts.append(f"UDP: sent seq {a + 1}–{b - 1}; reflector recv_count +{max(0, got)} → {what}.")
+        parts.append(w["udp"].format(a=a + 1, b=b - 1, got=max(0, got), what=what))
     tcp = []
     if any(e.kind == "stall" and e.detail.get("phase") == "start" for e in inc.events):
-        tcp.append("HB got no reply")
+        tcp.append(w["stall"])
     rtos = [e.detail["rto_ms"] for e in inc.events if e.kind == "tcp_info" and "rto_ms" in e.detail]
     retrans = max((e.detail.get("retransmits", 0) for e in inc.events if e.kind == "tcp_info"), default=0)
     if rtos and max(rtos) > min(rtos):
-        tcp.append(f"the kernel retransmitted {retrans} times (RTO {min(rtos) / 1000:g} → {max(rtos) / 1000:g} s)")
+        tcp.append(w["retrans"].format(n=retrans, lo=min(rtos) / 1000, hi=max(rtos) / 1000))
     if tcp:
         rst = any(e.kind == "rst" for e in inc.events)
-        tcp.append("an RST ended the connection" if rst else "no RST, so the connection survived")
+        tcp.append(w["rst"] if rst else w["no_rst"])
         ends = [e for e in inc.events if e.kind == "stall" and e.detail.get("phase") == "end"]
         if ends and not rst:
-            tcp.append(f"the first HB_ACK came after {ends[-1].detail.get('duration_s')} s of silence")
-        parts.append("TCP: " + "; ".join(tcp) + ".")
+            tcp.append(w["ack"].format(s=ends[-1].detail.get("duration_s")))
+        parts.append(w["tcp"].format(items=w["sep"].join(tcp)))
     return " ".join(parts)
