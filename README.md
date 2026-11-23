@@ -16,6 +16,8 @@ Three verdicts, worded as its alerts word them (durations made up):
 
 The drop's page adds the evidence: which direction lost the packets, what the router did meanwhile, what TCP did.
 
+**[Live demo](https://yhk0427.github.io/whydrop/)**: the dashboard's public view over two days of real recordings, with faults injected on purpose (read-only, times relative to the recording).
+
 ## Quick start
 
 ```sh
