@@ -19,7 +19,8 @@ def test_in_home_queueing_shows_the_slow_router_and_late_replies():
     assert rule == "R7"
     assert facts["gw"]["peak"] == 400.0 and facts["gw"]["base"] == 20.0 and facts["gw"]["ok"] == facts["gw"]["sent"]
     assert facts["line"]["late"] > 0 and facts["line"]["lost"] == 0
-    assert ruled["router"]["ok"] == facts["gw"]["sent"] and "line_late" in ruled and "local" in ruled
+    assert ruled["router"]["ok"] == facts["gw"]["sent"] and ruled["router"]["crossed"] == facts["line"]["ok"] + facts["line"]["late"]
+    assert ruled["line_late"]["answered"] == facts["line"]["ok"] + facts["line"]["late"] and "local" in ruled
 
 
 def test_a_line_drop_shows_the_loss_beyond_the_router_and_rules_out_the_router():

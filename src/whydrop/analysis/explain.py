@@ -93,12 +93,13 @@ def explain(inc: Incident, frames, ctx: Context, rule: str) -> dict:
     # the other causes, and the measurement that rules each out
     if not rule.startswith("R1a") and not wifi and ctx.link_kind == "wifi":
         out.append({"k": "wifi", "window": WIFI_WINDOW_S})
-    if rule not in ("R1b",) and gw and gw["ok"] > 0:
-        out.append({"k": "router", "ok": gw["ok"], "sent": gw["sent"]})
+    crossed = (line["ok"] + line["late"]) if line else 0   # replies from beyond the router: they crossed it
+    if rule not in ("R1b",) and gw and (gw["ok"] > 0 or crossed):
+        out.append({"k": "router", "ok": gw["ok"], "sent": gw["sent"], "crossed": crossed})
     if not rule.startswith("R2") and line and line["ok"] + line["late"] > 0 and "line" not in inc.segments:
         out.append({"k": "line_ok", "ok": line["ok"], "sent": line["sent"]})
     elif not rule.startswith("R2") and line and line["late"] > 0 and line["lost"] <= line["late"]:
-        out.append({"k": "line_late", "late": line["late"], "sent": line["sent"]})
+        out.append({"k": "line_late", "answered": line["ok"] + line["late"], "late": line["late"], "sent": line["sent"]})
     dns_ok = sum(r.ok for f in during for (p, _), r in f.samples.items() if p in ("dns", "dns_tcp"))
     if rule != "R3" and not dns and dns_ok:
         out.append({"k": "dns", "ok": dns_ok})
