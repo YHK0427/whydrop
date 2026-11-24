@@ -86,6 +86,7 @@ The dashboard needs a token when it listens beyond localhost. `?public=1` switch
 
 - Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (130 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h (up to 100 waiting). At most 12 alerts an hour: when a flapping line finalizes more, the next alert says how many were held. Bodies use the public view; `notify.lang = "ko"` sends them in the dashboard's Korean, and titles name the agent (`agent_name`).
 - Optional Uptime Kuma push heartbeat (`notify.kuma_push_url`).
+- **Prometheus / Grafana and Home Assistant**: `/api/metrics` (segment up/down, per-probe loss and RTT over the last minute, this month's availability, the last drop and its cause; no addresses in labels), a REST sensor and a webhook automation for Home Assistant. Copy-paste configs in [docs/integrations](docs/integrations.md).
 - Exports: drops, rough patches, events and minute aggregates as CSV or JSON; a per-drop bug report (public view, ±10 min); `whydrop replay` re-runs the analysis over a recorded database (`--write` updates past verdicts after an upgrade, with a backup first); `whydrop export-static` writes a read-only public demo of the dashboard.
 
 ## Tools that work alongside

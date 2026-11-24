@@ -4,6 +4,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- `GET /api/metrics` in the Prometheus text format (behind the dashboard token): segment up/down, per-probe loss, late share and RTT over the last complete minute, this month's availability and drops, the last drop and its rule. Labels carry probe classes, never addresses. `docs/integrations` has Prometheus, Grafana and Home Assistant configs.
+
 ## [0.3.0] - 2026-11-24
 
 ### Added
