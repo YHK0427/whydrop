@@ -60,6 +60,8 @@ class Incidents:
 
     def _close(self, inc: Incident, t: int, out: list) -> None:
         inc.end_ms = t
+        if t - inc.start_ms <= K.LONG_OUTAGE_S * 1000:
+            inc.tags.discard("long_outage")             # tagged while the recovery was being confirmed, but not past 1 h
         self.current, self.last = None, inc
         out.append(IncidentChange("close", inc))
 
@@ -144,7 +146,7 @@ class Incidents:
             elif e.kind == "rst" and e.detail.get("canary", "hot") == "hot":
                 self._pending.append((e.ts_ms + K.NAT_RESET_WINDOW_S * 1000, "rst", e))
             elif e.kind == "roam":
-                self._pending.append((e.ts_ms + K.ROAM_LOSS_WINDOW_S * 1000, "roam", e))
+                self._pending.append((e.ts_ms + (K.ROAM_LOSS_WINDOW_S + K.GATE_SHORT_S) * 1000, "roam", e))  # a drop it belongs to may take 10 s to confirm
         out += self._decide(t)
         return out
 

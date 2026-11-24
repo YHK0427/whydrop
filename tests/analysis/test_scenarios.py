@@ -141,7 +141,7 @@ def test_16_host_suspended_5_min_no_incident():
 
 
 def test_17_default_route_lost_wifi_up_r1d():
-    s = Scenario.default(200).fail(60, 70, probes={"host_net"})
+    s = Scenario.default(220).fail(60, 70, probes={"host_net"})       # final 130 s after the end
     s.fail(60, 70, probes=QUORUM | {"gateway"}, kind="local_fail")
     finals, _, _ = run(s)
     assert [f.cause.rule for f in finals] == ["R1d"]

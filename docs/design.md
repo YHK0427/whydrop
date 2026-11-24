@@ -20,7 +20,7 @@ The rules whydrop uses to decide, with every threshold. All thresholds live in `
 3. **Segment states**, decided per frame (below).
 4. **Incidents** open when a segment goes down; some open as points without any segment going down.
 5. **Conditions** (loss, latency, weak signal, Wi-Fi/LAN loss, busy host): lasting over 30 s they become *rough patches*. They label patches; they never open incidents on their own.
-6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 120 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging); then frozen. Whether the final differs from the provisional is stored.
+6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 130 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging; the line down can be confirmed up to 10 s after its start); then frozen. Whether the final differs from the provisional is stored.
 
 An incident's end is the first success that counts as recovery; for the line, the first success of a basic line-quorum probe — never the canary, whose TCP retransmission timer makes it recover late, and never udp_stream.
 
@@ -39,7 +39,7 @@ An incident's end is the first success that counts as recovery; for the line, th
 
 **Local vs. remote errors**: a send error is local only when the route table has no route for it (→ `host_net`). Errors reported back by the network with a route present (host unreachable, refused, administratively prohibited) are failures with the evidence "router reported unreachable".
 
-**The lossy-period gate**: if line heartbeat loss over the 60 s before a line-down start was ≥ 5 %, a down that recovers within 10 s is not an incident; it is a burst inside the loss condition. In a simulation (basic mode, 1 h per point), random loss of 5 / 10 / 20 / 30 % per direction produced 3 / 19 / 106 / 127 false line drops an hour without the gate and 0 / 0 / 2 / 0 with it, while 400 of 400 three-second blackholes on a clean line were caught either way.
+**The lossy-period gate**: if line heartbeat loss over the 60 s before a line-down start was ≥ 5 %, a down that recovers within 10 s is not an incident; it is a burst inside the loss condition. Seconds inside an earlier outage (the line, the router, Wi-Fi, the cable or this device down) don't count as loss. In a simulation (basic mode, 1 h per point), random loss of 5 / 10 / 20 / 30 % per direction produced 3 / 19 / 106 / 127 false line drops an hour without the gate and 0 / 0 / 2 / 0 with it, while 400 of 400 three-second blackholes on a clean line were caught either way.
 
 **Why the router rule needs the line too**: on a Wi-Fi host, power save and contention can delay the router check past its 1.5 s timeout twice in a row while the internet keeps answering through the same router. Replaying 10 hours recorded on a real Wi-Fi home server, requiring that nothing answered through the router removed 18 of 32 drops, all 2–7 s "router" drops during which line probes were succeeding.
 
