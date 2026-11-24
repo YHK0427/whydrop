@@ -125,7 +125,7 @@ docker compose exec whydrop whydrop nat-test
 |---|---|---|---|
 | Linux (Docker, 호스트 네트워크) | ✓ | ✓ | ✓ (`iw`) |
 | Linux (소스에서: `pip install '.[web]'`) | ✓ | ✓ | ✓ |
-| Windows (직접 설치, 소스에서) | ✓ | ✓ (`TCP_INFO` 없음) | ✓ (`netsh`, 영어 또는 한국어) |
+| Windows (직접 설치, 소스에서) | ✓ | ✓ (`TCP_INFO` 없음) | ✓ (`netsh`, 영어 또는 한국어. 다른 언어는 연결 여부와 AP만 봐요) |
 | Docker Desktop / WSL | 일부러 거부 | — | — |
 | 라즈베리 파이와 다른 arm64 / armv7 | 릴리스 때 이미지를 빌드하고 에뮬레이션으로 smoke 시험, 실기기에서는 아직 시험 안 함 | | |
 

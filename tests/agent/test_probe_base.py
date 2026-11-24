@@ -85,6 +85,8 @@ def winsock_error(code: int) -> OSError:
 def test_windows_winsock_codes_classified():
     assert classify_oserror(winsock_error(10051)).get("local_fail")  # WSAENETUNREACH
     assert classify_oserror(winsock_error(10065)).get("icmp")        # WSAEHOSTUNREACH
+    assert classify_oserror(winsock_error(1234)).get("icmp")         # ERROR_PORT_UNREACHABLE (overlapped UDP)
+    assert classify_oserror(winsock_error(1232)).get("icmp")         # ERROR_HOST_UNREACHABLE (overlapped UDP)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows retries SYN after RST (~2 s); gateway uses ICMP there")

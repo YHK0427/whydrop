@@ -28,6 +28,10 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - The dashboard API answered times or drop ids past 2^63 (or negative times) with a 500; they are now a 400.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
+- On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
+- On Windows in a language other than English or Korean (for example Japanese), `netsh` was always read as "Wi-Fi disconnected", so Wi-Fi was never watched. The listed BSSID now decides whether Wi-Fi is associated.
+- On Linux, a network name (SSID) containing text such as `freq: 2412` or `signal: -10` replaced the frequency and signal read from `iw`. Each value is now read from its own line only.
+- With two default routes (for example cable and Wi-Fi at once), the agent took the first one listed as the router and interface, not the one with the lowest metric that the system actually uses.
 
 ## [0.1.0] - 2026-11-23
 

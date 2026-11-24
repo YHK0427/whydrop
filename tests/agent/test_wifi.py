@@ -74,6 +74,58 @@ def test_netsh_garbage_is_empty_not_error():
     assert wifi.parse_netsh("no wireless interface\n") == {"connected": False}
 
 
+NETSH_JA = """
+システムに 1 インターフェイスがあります:
+
+    名前                   : Wi-Fi
+    説明                   : Example Wireless Adapter
+    物理アドレス           : 02:00:00:00:00:aa
+    状態                   : 接続されました
+    SSID                   : example-ssid
+    BSSID                  : 02:00:00:00:00:05
+    無線の種類             : 802.11ac
+    チャネル               : 36
+    シグナル               : 90%
+    プロファイル           : example-ssid
+"""
+NETSH_EN_DOWN = """
+There is 1 interface on the system:
+
+    Name                   : Wi-Fi
+    Physical address       : 02:00:00:00:00:aa
+    State                  : disconnected
+    Radio status           : Hardware On
+"""
+
+
+def test_netsh_unknown_locale_decides_by_bssid():
+    d = wifi.parse_netsh(NETSH_JA)  # state word not known: a listed BSSID means associated
+    assert d["connected"] is True and d["bssid"] == "02:00:00:00:00:05" and "signal_pct" not in d
+    ja_down = "\n".join(x for x in NETSH_JA.splitlines() if "SSID" not in x).replace("接続されました", "切断されました")
+    assert wifi.parse_netsh(ja_down)["connected"] is False
+    de = NETSH_EN.replace("State      ", "Status     ").replace("connected", "Verbunden")
+    assert wifi.parse_netsh(de)["connected"] is True
+
+
+def test_netsh_variants_never_crash(monkeypatch):
+    assert wifi.parse_netsh(NETSH_EN_DOWN) == {"connected": False, "state": "disconnected"}
+    assert wifi.parse_netsh("There is no wireless interface on the system.\n") == {"connected": False}
+    assert wifi.parse_netsh("") == {"connected": False}
+    no_signal = "\n".join(x for x in NETSH_EN.splitlines() if "Signal" not in x and "Rssi" not in x)
+    d = wifi.parse_netsh(no_signal)
+    assert d["connected"] and "signal_pct" not in d and "rssi_dbm" not in d
+    assert wifi.parse_netsh(NETSH_EN.replace("82%", "n/a").replace("-37", "?"))["connected"]
+    roaming = NETSH_EN.replace(": connected", ": associating")  # mid-roam: not associated yet
+    assert wifi.parse_netsh(roaming)["connected"] is False
+
+    for text in (NETSH_EN_DOWN, NETSH_JA, roaming, "", "\xff\xfe garbage : : :"):
+        async def fake_run(*a, text=text, **k):
+            return text
+        monkeypatch.setattr(wifi, "_run", fake_run)
+        s = asyncio.run(wifi.WindowsWifi().snapshot())
+        assert s is not None and (s.bssid is None) == (not s.up)
+
+
 def test_iw_parsers():
     assert wifi.parse_proc_wireless(PROC_WIRELESS, "wlan0") == -40.0
     assert wifi.parse_proc_wireless(PROC_WIRELESS, "wlan1") is None
@@ -162,3 +214,57 @@ def test_one_empty_iw_answer_is_not_a_reassoc(monkeypatch, tmp_path):
     p._last_iw = -1e9
     second = asyncio.run(p.snapshot())  # iw link came back empty once
     assert t.update(first) == [] and t.update(second) == [] and second.bssid == first.bssid
+
+def test_iw_values_come_from_their_own_lines():
+    tricky = IW_LINK.replace("example-ssid", "net freq: 2412 signal: -10 dBm")  # an SSID can hold any text
+    assert wifi.parse_iw_link(tricky) == {"bssid": "02:00:00:00:00:03", "freq": 5180, "signal": -41.0}
+
+
+SSID = "zq-made-up-ssid-41"
+
+
+def test_ssid_never_stored_by_any_path(monkeypatch, tmp_path, caplog):
+    import json
+    import logging
+
+    from whydrop.agent import run as runmod
+    from whydrop.agent.config import load_config
+    caplog.set_level(logging.DEBUG)
+    netsh = [t.replace("example-ssid", SSID) for t in (NETSH_EN, NETSH_KO, NETSH_JA)]
+    netsh.append(netsh[0].replace("02:00:00:00:00:01", "02:00:00:00:00:09"))  # a roam
+    iw_link = IW_LINK.replace("example-ssid", SSID)
+    returned = [wifi.parse_netsh(t) for t in netsh] + [wifi.parse_iw_link(iw_link), wifi.parse_iw_station(IW_STATION)]
+    assert SSID not in repr(returned)
+    queue = iter(netsh)
+
+    async def fake_run(*args, **k):
+        if args[0] == "netsh":
+            return next(queue)
+        return iw_link if args[-1] == "link" else IW_STATION
+    monkeypatch.setattr(wifi, "_run", fake_run)
+    (tmp_path / "sys" / "wlan0").mkdir(parents=True)
+    (tmp_path / "sys" / "wlan0" / "operstate").write_text("up\n")
+
+    async def main():
+        cfg = load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "db" / "w.db")})
+        a = runmod.Agent(cfg, asyncio.Event())
+        await a.store.open()
+        a.agg = runmod.Aggregator(a.store, a.now)
+        a.findings = runmod.FindingsTracker(a.targets, a.now)
+        a.wifi_tracker = WifiTracker(b"salt", a.now)
+        snaps = [await wifi.WindowsWifi().snapshot() for _ in netsh]
+        snaps.append(await wifi.LinuxWifi("wlan0", sys_root=tmp_path / "sys", proc_wireless=tmp_path / "x").snapshot())
+        assert all(s.up for s in snaps) and SSID not in repr(snaps)
+        for s in snaps:
+            await a.record([wifi.to_result(s, a.wifi_tracker, a.now()), *a.wifi_tracker.update(s)])
+        await a.agg.flush_ready(force=True)
+        await a.store.meta_set("ap_labels", json.dumps(a.wifi_tracker.labels))
+        await a.store.flush()
+        kinds = [r[0] for r in await a.store.execute("select kind from events")]
+        await a.store.close()
+        return kinds
+    assert "roam" in asyncio.run(main())  # events were written, so the grep below sees real rows
+    for f in (tmp_path / "db").iterdir():
+        data = f.read_bytes()
+        assert SSID.encode() not in data and SSID.encode("utf-16-le") not in data, f.name
+    assert SSID not in caplog.text

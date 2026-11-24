@@ -34,7 +34,11 @@ def parse_netsh(text: str) -> dict:
         k, v = line.split(":", 1)
         fields.setdefault(k.strip(), v.strip())
     pick = {name: next((fields[a] for a in aliases if a in fields), None) for name, aliases in _NETSH_KEYS.items()}
-    out: dict = {"connected": (pick["state"] or "").lower() in _CONNECTED}
+    if pick["state"] is not None:
+        connected = pick["state"].lower() in _CONNECTED
+    else:
+        connected = bool(pick["bssid"])  # other locales: netsh lists a BSSID only while associated
+    out: dict = {"connected": connected}
     if pick["state"] is not None:
         out["state"] = pick["state"]
     for name in ("bssid", "band", "channel", "radio"):
@@ -62,13 +66,13 @@ def parse_proc_wireless(text: str, iface: str) -> float | None:
 
 
 def parse_iw_link(text: str) -> dict:
-    m = re.search(r"Connected to ([0-9a-f:]{17})", text)
+    m = re.search(r"^Connected to ([0-9a-f:]{17})", text, re.M)
     if not m:
         return {}
     out: dict = {"bssid": m.group(1)}
-    if f := re.search(r"freq:\s*(\d+)", text):
+    if f := re.search(r"^\s*freq:\s*(\d+)", text, re.M):  # anchored: the SSID line can contain any text
         out["freq"] = int(f.group(1))
-    if s := re.search(r"signal:\s*(-?\d+)", text):
+    if s := re.search(r"^\s*signal:\s*(-?\d+)", text, re.M):
         out["signal"] = float(s.group(1))
     return out
 
