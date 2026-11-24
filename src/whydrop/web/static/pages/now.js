@@ -32,7 +32,7 @@ function lastDrop(drops, st) {
     const since = st?.since_ms ? (Date.now() - st.since_ms) / 1000 : st?.since_s != null ? -st.since_s : 0;
     return h("div", {},
       h("p", { class: "lastdrop" }, t("last.none", { dur: dur(since) })),
-      h("p", { class: "faint" }, t(isRemote() ? "test.hint_remote" : "test.hint")));
+      isPublic ? null : h("p", { class: "faint" }, t(isRemote() ? "test.hint_remote" : "test.hint")));   // the public view has no test button
   }
   const d = done[0];
   return h("div", { class: "row" },

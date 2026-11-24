@@ -172,9 +172,9 @@ export function toast(msg) {
 export function errorPanel(err, retry) {
   if (err instanceof ApiError && err.code === 401) return h("p", { class: "banner bad" }, t("error.token"));
   return h("div", { class: "banner bad" },
-    h("p", {}, t("error.load", { what: err.path || "data", code: err.code || "?" })),
-    h("button", { class: "btn", onclick: retry }, t("error.retry")),
-    h("p", { class: "faint" }, err.path || ""));
+    h("p", {}, err instanceof ApiError ? t("error.load", { what: err.path.split("?")[0], code: err.code })   // no epoch query
+      : t("error.offline")),   // fetch itself failed: no server answered, so there is no code to show
+    h("button", { class: "btn", onclick: retry }, t("error.retry")));
 }
 
 export const prefsGet = (k) => prefs?.getItem(k);

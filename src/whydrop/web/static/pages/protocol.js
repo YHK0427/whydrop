@@ -1,6 +1,6 @@
 // Protocol (#/protocol): recent WD/WT packets as hex with each field named as in docs/protocol (UI design doc §5.4).
 import { live } from "../app.js";
-import { STATIC, api, clock, h, lang, t, tsMs } from "../lib.js";
+import { STATIC, api, clock, errorPanel, h, lang, t, tsMs } from "../lib.js";
 
 // WD (44 B): !2sBBIIQIIII + hmac8 — field names as in docs/protocol
 const WD = [["magic", 2], ["version", 1], ["type", 1], ["session_id", 4], ["seq", 4], ["t_send_ns", 8], ["recv_count", 4],
@@ -19,7 +19,7 @@ function hexdump(hex) {
   return out;
 }
 
-export async function mount(main) {
+export async function mount(main, { refresh }) {
   if (STATIC) {   // the demo is a snapshot of incidents: no packet capture in it, so no table and nothing to pause
     const doc = `https://github.com/YHK0427/whydrop/blob/main/docs/protocol${lang === "ko" ? ".ko" : ""}.md`;
     main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("proto.title")),
@@ -27,7 +27,8 @@ export async function mount(main) {
     return () => {};
   }
   const cleanup = [];   // this mount's own: a later mount of the same page never shares it
-  let packets = await api("/api/packets").catch(() => []);
+  let packets;
+  try { packets = await api("/api/packets"); } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }   // not "no packets yet"
   const body = h("tbody"), detail = h("div");
   const draw = () => {
     body.replaceChildren(...packets.slice(-200).reverse().map(p => {

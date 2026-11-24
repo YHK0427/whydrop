@@ -88,6 +88,19 @@ def build(path: Path, mode: str = "precision", now_ms: int | None = None, outage
             "signal_dbm": -57, "link": "wifi", "vpn": False, "since_ms": now - 26 * 3600_000, "bytes": {}}
 
 
+def empty(path: Path, mode: str = "precision") -> dict:
+    """A fresh install: schema only, every segment still being checked, the baseline still learning."""
+    async def go():
+        s = Store(path)
+        await s.open()
+        await s.close()
+    asyncio.run(go())
+    now = int(time.time() * 1000)
+    return {"version": "0.1.0", "mode": mode, "agent": "home", "baseline": "learning", "now_ms": now,
+            "segments": dict.fromkeys(("host_net", "wifi", "link", "lan", "line", "dns"), "checking"),
+            "signal_dbm": None, "link": "wifi", "vpn": False, "since_ms": now - 5000, "bytes": {}}
+
+
 def serve(port: int = 8799, mode: str = "precision", outage_open: bool = False):
     import tempfile
 
