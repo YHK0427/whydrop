@@ -132,7 +132,10 @@ class _Canary:
             return "connect_failed"
         try:
             _tune(writer)
-            refused = await self._handshake(reader, writer)
+            try:
+                refused = await self._handshake(reader, writer)
+            except asyncio.TimeoutError:
+                return "connect_failed"  # our own HELLO_TIMEOUT_S, not the kernel giving up: no kernel_timeout event
             if refused:
                 self.state = "auth_failed" if refused == "auth_fail" else "down"
                 if not self._refusal_reported:

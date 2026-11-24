@@ -19,6 +19,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - Precision mode: one ECHO arriving more than 3 s out of order made the next ECHO look like the end of an outage and recorded a UDP outage with made-up download loss. An ECHO delayed from before a reflector restart was counted as a lost packet although it came back.
+- Precision mode: a canary whose TCP connection opened but whose handshake got no answer within 5 s recorded a "kernel timeout" (the kernel giving up on a connection). It is now a failed connection attempt, retried with the usual backoff.
 
 ## [0.1.0] - 2026-11-23
 

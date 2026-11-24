@@ -102,6 +102,71 @@ def test_stall_then_recovery():
     assert 0.6 <= stalls[1].detail["duration_s"] <= 1.4 and "reconnect" not in kinds(events)  # connection kept
 
 
+def test_long_stall_gives_up_and_reconnects():
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        p = Proxy(port)
+        pport = await p.start()
+        c = canary(pport, events, hb_s=0.1, stall_s=0.3, reconnect_stall_s=0.8, retry_s=0.1)
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(0.5)
+        p.hold_until = asyncio.get_running_loop().time() + 1.5   # longer than reconnect_stall_s
+        await asyncio.sleep(2.5)
+        stop.set()
+        await task
+        srv.close()
+        return c
+    c = asyncio.run(main())
+    stalls = [e.detail for e in events if e.kind == "stall"]
+    assert [s["phase"] for s in stalls][:2] == ["start", "end"] and stalls[1].get("reconnected") is True
+    assert "reconnect" in kinds(events) and "rst" not in kinds(events) and c.state == "ok"
+
+
+def test_kernel_timeout_mid_session_is_not_an_rst(monkeypatch):
+    import whydrop.agent.precision.canary as cm
+
+    def aborted(raw):
+        raise ConnectionAbortedError(10053, "the host aborted the connection")   # Windows' own retransmission give-up
+    monkeypatch.setattr(cm, "decode_frame", aborted)
+    events = []
+
+    async def main():
+        srv, port = await reflector()
+        c = canary(port, events, hb_s=0.1, retry_s=10)
+        c.err_hold_s = 0.1
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(0.8)
+        stop.set()
+        await task
+        srv.close()
+    asyncio.run(main())
+    assert kinds(events).count("kernel_timeout") == 1 and "rst" not in kinds(events)
+
+
+def test_handshake_timeout_is_not_a_kernel_timeout(monkeypatch):
+    import whydrop.agent.precision.canary as cm
+    monkeypatch.setattr(cm, "HELLO_TIMEOUT_S", 0.2)
+    events, held = [], []
+
+    async def main():
+        mute = await asyncio.start_server(lambda r, w: held.append(w), "127.0.0.1", 0, family=socket.AF_INET)  # no nonce
+        c = canary(mute.sockets[0].getsockname()[1], events, retry_s=0.1)
+        c.err_hold_s = 0.1
+        stop = asyncio.Event()
+        task = asyncio.create_task(c.run(stop))
+        await asyncio.sleep(1.0)
+        stop.set()
+        await task
+        mute.close()
+        return c
+    c = asyncio.run(main())
+    assert len(held) >= 2 and "kernel_timeout" not in kinds(events) and c.state == "down"  # our 5 s timer, not the kernel
+
+
 def test_rst_triggers_reconnect():
     events = []
 
@@ -237,7 +302,10 @@ def test_middlebox_flag_when_tcp_much_faster_than_udp():
         c = canary(port, events, hb_s=0.05, udp_rtt=lambda: 100.0, middlebox_hold_s=0.2)  # loopback TCP < 1 ms vs "100 ms" UDP
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
-        await asyncio.sleep(1.0)
+        for _ in range(50):                         # a loaded runner answers fewer than 20 HB/s
+            await asyncio.sleep(0.1)
+            if c.middlebox:
+                break
         stop.set()
         await task
         srv.close()
