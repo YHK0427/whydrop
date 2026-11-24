@@ -374,6 +374,12 @@ def test_roam_loss_window(offset, point):
     assert [f.incident.point for f in finals(s)] == (["roam_loss"] if point else [])
 
 
+@pytest.mark.parametrize("offset, rule", [(-6, "R2"), (-5, "R1a"), (15, "R1a"), (16, "R2")])
+def test_r1a_roam_window(offset, rule):
+    """One drop, not also a roam_loss point: the line drop that the roam's loss belongs to is confirmed after it."""
+    assert [f.cause.rule for f in finals(Scenario.default(300).event("roam", 60 + offset).internet_down(60, 90))] == [rule]
+
+
 @pytest.mark.parametrize("offset, rule", [(15, "R1a"), (16, "R2")])
 def test_r1a_wifi_down_window(offset, rule):
     s = Scenario.default(300).internet_down(60, 100).fail(60 + offset, 64 + offset, probes={"wifi"})

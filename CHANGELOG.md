@@ -5,6 +5,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Fixed
+- A Wi-Fi roam just before a line drop was reported twice, as a "roaming with loss" point and as the drop's Wi-Fi cause. The roam is now judged after the drop could be confirmed, so it is one drop.
 - A drop of exactly 1 h was marked a long outage: the tag was set while its recovery was still being confirmed. Only drops longer than 1 h keep it.
 - A line drop starting 119–120 s after a Wi-Fi, cable or router recovery (or up to 10 s earlier during a lossy period) became a separate drop: the earlier drop's cause was made final at 120 s, before the line drop could be confirmed. Those drops are now final 130 s after they end, and the line drop joins them as documented.
 - A short line drop soon after a router outage was dropped as a "burst": the router outage's own lost heartbeats counted as a lossy period. Seconds inside an earlier outage no longer count, so the drop joins the router's incident as a restart.
