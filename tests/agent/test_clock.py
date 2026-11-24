@@ -136,3 +136,21 @@ def test_boot_step_before_rebase_is_followed():
     assert abs(t.now_ms() - f.wall * 1000) < 1
     f.advance(1)
     assert t.check() == [] and abs(t.now_ms() - f.wall * 1000) < 1
+
+
+def test_after_a_backward_step_timestamps_catch_up_with_the_wall_without_going_back():
+    """Final review: after a backward step the timestamps stayed ahead forever, so the dashboard (which asks by wall
+    time) missed the newest data until a restart. They now run at half speed until they meet the wall clock."""
+    f = Fake()
+    t = tb(f)
+    f.advance(10)
+    f.wall -= 3600
+    t.check()
+    last = t.now_ms()
+    for _ in range(7300):                                  # a little over two hours of 1 s ticks
+        f.advance(1)
+        t.check()
+        now = t.now_ms()
+        assert now > last                                  # never back, never a repeated second
+        last = now
+    assert abs(t.now_ms() / 1000 - f.wall) < 1.0

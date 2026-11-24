@@ -68,3 +68,35 @@ def test_a_line_drop_after_a_router_drop_is_finalized_once():
     apart = finals(200)                        # past the window: two drops, each finalized once
     keys = [f.incident.key for f in apart]
     assert len(keys) == len(set(keys)) == 2, [(f.incident.start_ms, f.incident.end_ms, f.cause.rule) for f in apart]
+
+
+def test_drops_settled_by_a_restart_still_alert_and_stale_findings_close(tmp_path):
+    """Final review: a drop that ended under 80 s before a restart (or was open across it) got its cause frozen
+    without the 'finalized' message, so it never alerted; findings a crashed run left open stayed open forever."""
+    import asyncio
+    import json
+
+    from whydrop.agent.store import Store
+    from whydrop.analysis.persist import Recorder
+    from whydrop.web.bus import Bus
+
+    async def go():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        r1 = await s.run_start(1_000, "t", {})
+        await s.run_heartbeat(r1, 50_000)
+        await s.insert("incidents", start_ms=20_000, primary_cause="R1a", tags_json=json.dumps({"segments": ["wifi"]}))
+        await s.insert("incidents", start_ms=5_000, end_ms=8_000, primary_cause="R2", tags_json="{}")
+        await s.insert("incidents", start_ms=1_000, end_ms=2_000, primary_cause="R3", cause_final="R3", tags_json="{}")
+        await s.insert("findings", kind="secret_mismatch", start_ms=30_000, detail_json="{}")
+        bus = Bus()
+        q = bus.subscribe({"incident"})
+        r2 = await s.run_start(9_000_000, "t", {})
+        await Recorder(s, bus=bus).close_previous_run(r2)
+        got = [q.get_nowait() for _ in range(q.qsize())]
+        open_findings = await s.execute("select count(*) from findings where end_ms is null")
+        await s.close()
+        return got, open_findings[0][0]
+    got, open_findings = asyncio.run(go())
+    assert sorted((m["data"]["op"], m["data"]["row"]["cause_final"]) for m in got) == [("finalized", "R1a"), ("finalized", "R2")]
+    assert open_findings == 0

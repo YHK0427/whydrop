@@ -11,6 +11,7 @@ STEP_S = 2.0               # wall vs. expected drift that counts as a clock step
 SUSPEND_LINUX_S = 2.0      # growth of BOOTTIME − MONOTONIC that means the host slept
 SUSPEND_WINDOWS_S = 5.0
 SLEW_BACK_MAX_S = 1.0     # follow wall time backwards only by less than this per tick
+CATCH_UP_RATE = 0.5       # ahead of the wall after a backward step: run at half speed until it catches up
 TIME_ERROR = 5             # adjtimex state: clock not synchronized
 
 
@@ -28,8 +29,8 @@ class TimeBase:
         self._last_wall, self._last_mono = self._anchor_wall, self._anchor_mono
         self._last_gap = boot() - mono() if boot else 0.0
 
-    def _anchor(self, w: float, m: float) -> None:
-        self._anchor_wall, self._anchor_mono = w, m
+    def _anchor(self, w: float, m: float, rate: float = 1.0) -> None:
+        self._anchor_wall, self._anchor_mono, self._rate = w, m, rate
 
     def rebase(self) -> None:
         """Start fresh right before ticking starts: startup work isn't a suspend, and a clock step that
@@ -40,7 +41,7 @@ class TimeBase:
             self._last_gap = self._boot() - self._last_mono
 
     def now_ms(self) -> int:
-        return int((self._anchor_wall + self._mono() - self._anchor_mono) * 1000)
+        return int((self._anchor_wall + (self._mono() - self._anchor_mono) * self._rate) * 1000)
 
     def check(self) -> list[Event]:
         """Call every tick. Forward clock steps and wake-ups re-anchor; a backward step is recorded but
@@ -62,13 +63,20 @@ class TimeBase:
             out.append(Event("suspend", int(w * 1000), detail={"slept_s": round(slept, 1)}))
         else:
             jump = (w - self._last_wall) - (m - self._last_mono)  # step since the previous tick, not since start
-            ahead = (self._anchor_wall + m - self._anchor_mono) - w  # how far our timestamps run ahead of wall
+            ours = self._anchor_wall + (m - self._anchor_mono) * self._rate
+            ahead = ours - w  # how far our timestamps run ahead of wall
             if abs(jump) > STEP_S:
                 if jump > 0:
                     self._anchor(w, m)
+                else:   # never go back (a second would be reused): slow down until the wall catches up instead
+                    self._anchor(ours, m, CATCH_UP_RATE)
                 out.append(Event("clock_step", self.now_ms(), detail={"delta_s": round(jump, 3)}))
+            elif self._rate < 1.0 and ahead > 0:
+                pass   # still catching up at half speed: never step back, even by a fraction
             elif -STEP_S < ahead < SLEW_BACK_MAX_S:
                 self._anchor(w, m)  # follow NTP slew; a sub-second move back stays inside an open 1 s bucket
+            elif ahead >= SLEW_BACK_MAX_S and self._rate == 1.0:
+                self._anchor(ours, m, CATCH_UP_RATE)   # ahead without a step this tick (e.g. a slow NTP slew back)
         self._last_wall, self._last_mono = w, m
         return out
 

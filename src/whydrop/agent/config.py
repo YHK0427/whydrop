@@ -158,6 +158,8 @@ def _bool(v, key: str) -> bool:
 
 def _build(raw: dict, env: Mapping[str, str]) -> Config:
     c = Config()
+    if env.get("WHYDROP_DEFAULT_WEB_BIND"):   # a deployment's default (compose: the LAN); whydrop.toml and WHYDROP_WEB_BIND still win
+        c = replace(c, web=replace(c.web, bind=env["WHYDROP_DEFAULT_WEB_BIND"]))
     flat = {k: raw[k] for k in ("agent_name", "reflector", "gateway", "gateway_port", "router_dns", "wifi_interface")
             if k in raw}
     if "db_path" in raw:

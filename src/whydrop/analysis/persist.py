@@ -34,6 +34,8 @@ class Recorder:
         prev = await self.store.execute("SELECT MAX(COALESCE(stop_ms, heartbeat_ms, start_ms)) FROM agent_runs "
                                         "WHERE agent_id = ? AND id != ?", (aid, run_id if run_id is not None else -1))
         end = prev[0][0] if prev and prev[0][0] is not None else None
+        settled = [r[0] for r in await self.store.execute("SELECT id FROM incidents WHERE agent_id = ? AND cause_final IS NULL",
+                                                          (aid,))]   # these never got their 'finalized' (and their alert)
         for rid, start, tags in await self.store.execute(
                 "SELECT id, start_ms, tags_json FROM incidents WHERE agent_id = ? AND end_ms IS NULL", (aid,)):
             t = json.loads(tags or "{}")
@@ -44,6 +46,14 @@ class Recorder:
                                  "end_ms IS NOT NULL AND cause_final IS NULL", (aid,))
         await self.store.execute("UPDATE conditions SET end_ms = MAX(start_ms, ?) WHERE agent_id = ? AND end_ms IS NULL",
                                  (end or 0, aid))
+        await self.store.execute("UPDATE findings SET end_ms = MAX(start_ms, ?) WHERE agent_id = ? AND end_ms IS NULL",
+                                 (end or 0, aid))   # a run that crashed never closed them; this run raises them again if they still hold
+        for rid in settled:
+            rows = await self.store.execute("SELECT id, start_ms, end_ms, primary_cause, cause_final, tags_json, evidence_json "
+                                            "FROM incidents WHERE id = ?", (rid,))
+            if rows:
+                keys = ("id", "start_ms", "end_ms", "primary_cause", "cause_final", "tags_json", "evidence_json")
+                self._pub("incident", {**dict(zip(keys, rows[0])), "cause_changed": 0}, "finalized")
 
     async def nat_tcp_lower(self) -> int | None:
         """Longest TCP idle delay the last nat-test saw survive (R5 expiry vs loss)."""
