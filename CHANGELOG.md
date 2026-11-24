@@ -4,6 +4,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+### Added
+- The ISP report is a printable page (#/isp): one sentence that sums it up, the month as days recorded with event marks, and each event as a pair of bars in path order, the router at that moment next to what was lost beyond it. "Save as PDF" prints it on A4; "Download as text" keeps the plain-text form. `GET /api/isp-report?format=json` gives the same numbers.
+
 ## [0.5.0] - 2026-11-25
 
 ### Added
