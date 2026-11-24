@@ -71,6 +71,7 @@ Everything is optional. Settings come from `WHYDROP_*` environment variables (in
 | `WHYDROP_SECRET` | shared secret, ≥ 32 bytes; environment only, never in a file in the repo |
 | `WHYDROP_WEB_BIND` | dashboard address; the compose default is `0.0.0.0:8790`, use `127.0.0.1:8790` to keep it local |
 | `WHYDROP_UI_TOKEN` | your own dashboard token (otherwise one is generated and logged once) |
+| `WHYDROP_AGENT_NAME` | this agent's name in the dashboard header and alert titles (default `home`) |
 
 ## Reading the dashboard
 

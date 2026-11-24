@@ -109,3 +109,13 @@ def test_in_home_queueing_alert_names_the_home_network_and_says_slowed():
     assert sentence.startswith("Home network slowed down for 46 s. In-home queueing (likely).")
     r7 = {**row, "evidence_json": json.dumps({"label": "Queueing caused the timeouts (likely)", "cause": "R7"})}
     assert text(r7, ROW["end_ms"])[1].startswith("Internet line slowed down for 46 s.")   # queueing past the router
+
+
+def test_alert_title_names_the_agent():
+    """agent_name was documented as 'shown in alerts' but never was: with two agents you couldn't tell them apart."""
+    body, headers = payload(ROW, "ntfy", ROW["end_ms"], name="parents")
+    assert headers["Title"] == "whydrop parents: Internet line dropped"
+    assert json.loads(payload(ROW, "discord", ROW["end_ms"], name="parents")[0])["content"].startswith("**whydrop parents:")
+    blob = json.loads(payload(ROW, "json", ROW["end_ms"], name="parents")[0])
+    assert blob["title"] == "whydrop parents: Internet line dropped" and "parents" not in json.dumps(blob["drop"])
+    assert payload(ROW, "ntfy", ROW["end_ms"])[1]["Title"] == "whydrop: Internet line dropped"   # no name: as before

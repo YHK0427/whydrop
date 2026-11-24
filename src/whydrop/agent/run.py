@@ -527,7 +527,7 @@ class Agent:
     # ---------- alerts ----------
     async def start_notify(self) -> None:
         from whydrop.agent.notify import Notifier
-        self.notifier = Notifier(dict(self.cfg.notify), self.now,
+        self.notifier = Notifier(dict(self.cfg.notify), self.now, name=self.cfg.agent_name,
                                  on_queue=lambda q: self.spawn(self.store.meta_set("notify_queue", json.dumps(q)),
                                                                "alert queue"))
         if not (self.notifier.enabled or self.notifier.kuma):

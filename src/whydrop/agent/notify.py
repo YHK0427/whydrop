@@ -17,21 +17,22 @@ WORDS = {"home": "Home network", "line": "Internet line", "lan": "Router", "wifi
          "dns_router": "DNS", "dns_isp": "DNS", "dns_public": "DNS"}
 
 
-def text(row: dict, now_ms: int) -> tuple[str, str]:
+def text(row: dict, now_ms: int, name: str | None = None) -> tuple[str, str]:
     """(title, sentence) in UI vocabulary: 'Internet line dropped for 46 s. Line drop … (likely).'"""
     p = public(row, "incident", now_ms)
     label = p["evidence"].get("label", "Likely cause unknown")
     dur = (p["end_s"] or 0) - (p["start_s"] or 0)
     segs, verb = shown_segments(p["segments"], p["evidence"]), "slowed down" if slowed(p["cause"]) else "dropped"
     where = ", ".join(dict.fromkeys(WORDS.get(s, s) for s in segs)) or (p["point"] or "Connection").replace("_", " ")
-    title = f"whydrop: {where} {verb}" if segs else f"whydrop: {where}"
+    head = f"whydrop {name}" if name else "whydrop"   # agent_name: which agent, when several alert one channel
+    title = f"{head}: {where} {verb}" if segs else f"{head}: {where}"
     sentence = (f"{where} {verb} for {dur} s. {label}." if segs else f"{label}.")
     step = p["evidence"].get("next_step")
     return title, sentence + (f" {step}." if step else "")
 
 
-def payload(row: dict, fmt: str, now_ms: int) -> tuple[str, dict]:
-    title, sentence = text(row, now_ms)
+def payload(row: dict, fmt: str, now_ms: int, name: str | None = None) -> tuple[str, dict]:
+    title, sentence = text(row, now_ms, name)
     if fmt == "ntfy":
         return sentence, {"Title": title, "Tags": "warning", "Content-Type": "text/plain; charset=utf-8"}
     if fmt == "discord":
@@ -49,7 +50,8 @@ def _post(url: str, body: str, headers: dict) -> None:
 
 
 class Notifier:
-    def __init__(self, cfg_notify, now_ms, on_queue=None):
+    def __init__(self, cfg_notify, now_ms, on_queue=None, name: str | None = None):
+        self.name = name
         self.on_queue = on_queue or (lambda q: None)   # persist after every change
         self.url = (cfg_notify or {}).get("webhook_url")
         self.fmt = (cfg_notify or {}).get("format", "json")
@@ -62,7 +64,7 @@ class Notifier:
         return bool(self.url)
 
     async def _send(self, row: dict) -> bool:
-        body, headers = payload(row, self.fmt, self.now_ms())
+        body, headers = payload(row, self.fmt, self.now_ms(), self.name)
         try:
             await asyncio.to_thread(_post, self.url, body, headers)
             return True

@@ -71,6 +71,7 @@ docker compose exec whydrop whydrop nat-test
 | `WHYDROP_SECRET` | 공유 비밀값, 32바이트 이상. 환경 변수로만 주고, 레포의 파일에는 절대 넣지 마세요 |
 | `WHYDROP_WEB_BIND` | 대시보드 주소. compose 기본값은 `0.0.0.0:8790`이고, 로컬에서만 보려면 `127.0.0.1:8790` |
 | `WHYDROP_UI_TOKEN` | 직접 정한 대시보드 토큰(없으면 만들어서 로그에 한 번 보여 줘요) |
+| `WHYDROP_AGENT_NAME` | 대시보드 머리글과 알림 제목에 쓰는 이 에이전트의 이름(기본 `home`) |
 
 ## 대시보드 보는 법
 
