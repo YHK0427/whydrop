@@ -3,6 +3,7 @@ import asyncio
 import json
 import socket
 import sqlite3
+import time
 
 import pytest
 
@@ -72,6 +73,23 @@ def run_for(cfg, seconds):
         stop.set()
         await asyncio.wait_for(task, 10)
     asyncio.run(go())
+
+
+def run_until(cfg, done, timeout_s):
+    """Run the agent until `done()` holds (checked every 0.5 s) or the timeout; returns the seconds it took."""
+    async def go():
+        stop = asyncio.Event()
+        task = asyncio.create_task(runmod.run_agent(cfg, stop=stop))
+        t = time.monotonic()
+        while time.monotonic() - t < timeout_s and not task.done():
+            await asyncio.sleep(0.5)
+            if await asyncio.to_thread(done):
+                break
+        took = time.monotonic() - t
+        stop.set()
+        await asyncio.wait_for(task, 10)
+        return took
+    return asyncio.run(go())
 
 
 def db(cfg, sql):
@@ -305,8 +323,9 @@ def test_precision_e2e(fakes, monkeypatch, tmp_path):
     import sys
     cfg = precision_cfg(tmp_path, monkeypatch)
     run_with(cfg, 5.0)
-    [(sent, ok, lost)] = db(cfg, "select sum(sent), sum(ok), sum(lost) from samples_1s where probe = 'udp_stream'")
-    assert 30 <= sent <= 55 and lost == 0 and ok == sent
+    [(sent, ok, lost, late, local)] = db(cfg, "select sum(sent), sum(ok), sum(lost), sum(late), sum(local_fail) "
+                                              "from samples_1s where probe = 'udp_stream'")
+    assert 30 <= sent <= 55 and lost == 0 and local == 0 and ok + late == sent   # a loaded machine can be late, never lossy
     kinds = {k for (k,) in db(cfg, "select kind from events")}
     assert "auth_fail" not in kinds and ("tcp_info" in kinds) == sys.platform.startswith("linux")
     assert json.loads(db(cfg, "select tags_json from agent_runs")[0][0])["mode"] == "precision"
@@ -357,7 +376,12 @@ def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_p
     async def no_link():
         return None
     monkeypatch.setattr(runmod.Agent, "job_link_layer", lambda self: no_link())  # CI runners have a real /sys link
-    run_for(cfg, 25)  # roomy: under a loaded CI runner the 6.5 s finalize lag plus the drop needs time
+    def written():
+        try:
+            return bool(db(cfg, "select 1 from incidents"))
+        except sqlite3.OperationalError:   # the store hasn't made its tables yet
+            return False
+    run_until(cfg, written, 90)   # usually 14 s; a fixed 25 s once ran out on a loaded CI runner
     rows = db(cfg, "select start_ms, primary_cause, evidence_json, tags_json from incidents")
     assert len(rows) == 1 and rows[0][1] == "R2" and "likely" in json.loads(rows[0][2])["label"]
     assert json.loads(rows[0][3])["segments"] == ["line"]
@@ -451,3 +475,26 @@ def test_dashboard_port_in_use_does_not_stop_recording(fakes, caplog):
         busy.close()
     assert db(cfg, "select count(*) from samples_1s where probe = 'gateway'")[0][0] >= 1
     assert "dashboard off: can't listen" in caplog.text  # refused cleanly, not stolen (Windows SO_REUSEADDR) or exit()
+
+
+def test_config_enable_7500_reaches_the_dashboard_run(fakes, monkeypatch):
+    """The dashboard's "Run NAT test" never tried 7500 s, whatever `[nat] enable_7500` said."""
+    from dataclasses import replace
+
+    from whydrop.agent.precision import natprobe
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    async def fake(addr, secret, *, tcp_delays=natprobe.TCP_DELAYS, on_progress=None, **k):
+        seen["tcp"] = tcp_delays
+        raise Stop
+    monkeypatch.setattr(natprobe, "nat_test", fake)
+    monkeypatch.setenv("WHYDROP_SECRET", "s" * 40)
+    cfg, _, _ = fakes
+    for enabled in (False, True):
+        agent = runmod.Agent(replace(cfg, reflector="192.0.2.9:48100", nat_enable_7500=enabled), asyncio.Event())
+        with pytest.raises(Stop):
+            asyncio.run(agent._run_nat())
+        assert (seen["tcp"][-1] == 7500) is enabled
