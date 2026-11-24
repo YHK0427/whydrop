@@ -186,3 +186,15 @@ def test_a_storm_of_drops_is_capped_and_the_next_alert_says_how_many_were_held()
     assert len(sink.got) == 13
     assert sink.got[-1][1].endswith("(+8 more drops not alerted; see the dashboard)")
     assert "more drops" not in sink.got[-2][1]
+
+
+def test_a_failing_webhook_logs_no_part_of_its_url(caplog):
+    import logging
+    caplog.set_level(logging.DEBUG)
+    sink = Sink(fail=99)
+    url = sink.url + "?auth=hookTok_" + "h" * 20
+    n = Notifier({"webhook_url": url, "kuma_push_url": url}, now_ms=lambda: ROW["end_ms"])
+    asyncio.run(n.handle(finalized()))
+    asyncio.run(n.kuma_push())
+    sink.close()
+    assert "not delivered" in caplog.text and "hookTok_" not in caplog.text and "127.0.0.1" not in caplog.text
