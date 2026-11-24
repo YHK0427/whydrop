@@ -4,6 +4,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- `whydrop replay --write`: after an upgrade, store the current analysis's verdict on past drops (backup first; point events and drops without 1-second data are left alone).
+
 ### Fixed
 - The 6 h, 24 h and 7 d charts were empty for the first 7 days: 1-minute aggregates were only made from 1-second rows older than 7 days. They are now made as data comes in, 5 minutes behind, and the long views read them together with the latest 1-second rows, counting each second once.
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.

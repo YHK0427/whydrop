@@ -86,7 +86,7 @@ docker compose exec whydrop whydrop nat-test
 
 - 웹훅(`notify.webhook_url`, 형식 `json`, `ntfy`, `discord`)은 **끊김이 확정될 때**, 즉 끝나고 80초 뒤(와이파이·케이블·공유기가 끊겼던 경우 120초 뒤)에 보내요. 끊긴 회선으로는 어차피 아무것도 보낼 수 없으니까요. 실패하면 24시간 동안 다시 시도해요(대기 최대 100개). 알림은 한 시간에 최대 12개이고, 연결이 계속 끊겼다 붙어서 더 많이 확정되면 다음 알림에 보내지 않은 개수를 붙여요. 내용은 공개 보기를 써요. `notify.lang = "ko"`면 대시보드와 같은 한국어로 보내고, 제목에는 에이전트 이름(`agent_name`)이 들어가요.
 - 선택: Uptime Kuma push 하트비트(`notify.kuma_push_url`).
-- 내보내기: 끊김, 불안정 구간, 이벤트, 1분 집계를 CSV나 JSON으로. 끊김별 버그 리포트(공개 보기, 앞뒤 10분). `whydrop replay`는 기록된 DB로 분석을 다시 돌리고, `whydrop export-static`은 읽기 전용 공개 데모를 만들어요.
+- 내보내기: 끊김, 불안정 구간, 이벤트, 1분 집계를 CSV나 JSON으로. 끊김별 버그 리포트(공개 보기, 앞뒤 10분). `whydrop replay`는 기록된 DB로 분석을 다시 돌리고(`--write`는 업그레이드 후 백업을 먼저 만든 뒤 과거 판정을 갱신해요), `whydrop export-static`은 읽기 전용 공개 데모를 만들어요.
 
 ## 함께 쓰는 도구들
 

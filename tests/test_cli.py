@@ -112,3 +112,41 @@ def test_nat_test_follows_enable_7500_in_the_config(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "whydrop.toml").write_text("[nat]\nenable_7500 = true\n")
     assert main(["nat-test", "--tcp-only"]) == 0 and seen["tcp"][-1] == 7500
+
+
+def test_replay_write_rewrites_stale_verdicts_after_a_backup(tmp_path, capsys):
+    """Verdicts stored by an older analysis stay stale (the demo's incident 38 did). `replay --write` backs the DB up,
+    then rewrites a stored verdict only when exactly one replayed incident covers it; point events (NAT, replayed only
+    approximately) and incidents whose 1 s data is gone are left alone."""
+    import json
+    import sqlite3
+    db = tmp_path / "w.db"
+    _db_with_drop(db)
+    t0 = 1_800_000_000_000
+    con = sqlite3.connect(db)
+    ins = ("INSERT INTO incidents (agent_id, start_ms, end_ms, primary_cause, cause_final, tags_json, evidence_json) "
+           "VALUES (1, ?, ?, ?, ?, ?, ?)")
+    stale = {"label": "Router problem (likely)", "cause": "R1b", "next_step": "Reboot the router", "cause_classes": ["x"]}
+    con.execute(ins, (t0 + 30_000, t0 + 35_000, "R1b", "R1b", json.dumps({"segments": ["lan"], "point": None}),
+                      json.dumps(stale)))
+    con.execute(ins, (t0 + 32_000, t0 + 32_000, "R5_reset", "R5_reset", json.dumps({"segments": [], "point": "nat_reset"}),
+                      json.dumps({"label": "NAT/firewall reset (likely)", "cause": "R5"})))
+    con.execute(ins, (t0 - 30 * 86_400_000, t0 - 30 * 86_400_000 + 5000, "R1b", "R1b",
+                      json.dumps({"segments": ["lan"], "point": None}), json.dumps(stale)))
+    con.commit()
+    con.close()
+    assert main(["replay", str(db), "--write"]) == 0
+    out = capsys.readouterr().out
+    con = sqlite3.connect(db)
+    rows = {r[0]: (r[1], json.loads(r[2])) for r in con.execute("SELECT id, cause_final, evidence_json FROM incidents")}
+    con.close()
+    rule, ev = rows[1]
+    assert rule == "R2" and "likely" in ev["label"] and ev["label"] != stale["label"] and "cause_classes" not in ev
+    assert "protocol" in ev and "protocol_ko" in ev
+    assert rows[2][0] == "R5_reset" and rows[3][1] == stale                          # point event, data gone: untouched
+    [backup] = list(tmp_path.glob("w.db.before-replay-*.db"))
+    con = sqlite3.connect(backup)
+    assert con.execute("SELECT cause_final FROM incidents WHERE id = 1").fetchone() == ("R1b",)
+    con.close()
+    assert "1 rewritten" in out and "point event" in out and "no 1 s data" in out and str(backup.name) in out
+    assert main(["replay", str(db), "--write", "--set", "LINE_LOOKBACK_S=9"]) == 2   # never write tuned verdicts

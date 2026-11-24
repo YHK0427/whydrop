@@ -143,6 +143,18 @@ def _replay(args: argparse.Namespace) -> int:
     if not args.db.exists():
         print(f"whydrop: no such database: {args.db}", file=sys.stderr)
         return 2
+    if args.write:
+        if args.set or args.from_ or args.to:   # stored verdicts come from the shipped constants over all the data
+            print("whydrop: --write can't be combined with --set, --from or --to", file=sys.stderr)
+            return 2
+        from whydrop.analysis.replay import rewrite
+        backup = args.db.with_name(f"{args.db.name}.before-replay-{datetime.now():%Y%m%d-%H%M%S}.db")
+        rows = rewrite(args.db, backup)
+        for r in rows:
+            start = datetime.fromtimestamp(r["start_ms"] / 1000).isoformat(timespec="seconds")
+            print(f"#{r['id']:<5} {start}  {r['status']:<18} {r['old'] or '-'}" + (f"  ->  {r['new']}" if r.get("new") else ""))
+        print(f"{sum(r['status'] == 'rewritten' for r in rows)} rewritten of {len(rows)}; backup: {backup}")
+        return 0
     for item in args.set or []:
         name, _, value = item.partition("=")
         try:
@@ -237,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--to", default=None, help="ISO time")
     rp.add_argument("--set", action="append", metavar="NAME=VALUE", help="override an analysis constant")
     rp.add_argument("--json", action="store_true")
+    rp.add_argument("--write", action="store_true",
+                    help="back the database up, then store the current analysis's verdict on each past drop")
     an = sub.add_parser("annotate", help="label a scene (reproduced / injected / user-test)")
     an.add_argument("--config", type=Path, default=None)
     an.add_argument("--label", required=True, choices=("reproduced", "injected", "user-test"))

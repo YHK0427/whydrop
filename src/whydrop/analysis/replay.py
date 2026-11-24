@@ -71,3 +71,51 @@ def summary(changes) -> list[dict]:
             out.append({"start_ms": inc.start_ms, "end_ms": inc.end_ms, "cause": ch.obj.cause.rule,
                         "label": ch.obj.cause.label, "point": inc.point, "segments": sorted(inc.segments)})
     return out
+
+
+SLACK_MS = 2000   # a replayed incident may start or end a second or two off the stored one
+
+
+def rewrite(db: Path, backup: Path) -> list[dict]:
+    """`replay --write`: copy the DB to `backup`, then give each stored incident the verdict the current analysis
+    reaches, when exactly one replayed incident covers it. Point events (NAT resets and the like replay only
+    approximately) and incidents whose 1 s data is gone keep what they have. Returns one row per stored incident."""
+    finals = [c.obj for c in replay(db) if c.type == "final"]
+    con = sqlite3.connect(db)
+    try:
+        with sqlite3.connect(backup) as b:
+            con.backup(b)
+        b.close()
+        first = con.execute("SELECT MIN(ts_ms) FROM samples_1s").fetchone()[0]
+        out = []
+        for rid, start, end, tags, ev in con.execute(
+                "SELECT id, start_ms, end_ms, tags_json, evidence_json FROM incidents WHERE end_ms IS NOT NULL "
+                "ORDER BY id").fetchall():
+            old = json.loads(ev or "{}")
+            row = {"id": rid, "start_ms": start, "old": old.get("label")}
+            if (json.loads(tags or "{}")).get("point"):
+                out.append({**row, "status": "point event"})
+                continue
+            if first is None or start < first:
+                out.append({**row, "status": "no 1 s data"})
+                continue
+            m = [f for f in finals if not f.incident.point and f.incident.start_ms <= end + SLACK_MS
+                 and (f.incident.end_ms or f.incident.start_ms) >= start - SLACK_MS]
+            if len(m) != 1:
+                out.append({**row, "status": f"{len(m)} replayed matches"})
+                continue
+            c, inc = m[0].cause, m[0].incident
+            new = {k: v for k, v in old.items() if not k.startswith("cause_")}   # the old rule's own evidence goes
+            new.update(cause=c.rule, label=c.label, next_step=c.next_step, secondary=c.secondary,
+                       protocol=inc.evidence.get("protocol", ""), protocol_ko=inc.evidence.get("protocol_ko", ""),
+                       **{f"cause_{k}": v for k, v in c.evidence.items()})
+            if new == old:
+                out.append({**row, "status": "same", "new": c.label})
+                continue
+            con.execute("UPDATE incidents SET cause_final = ?, evidence_json = ? WHERE id = ?",
+                        (c.rule, json.dumps(new, ensure_ascii=False, default=str), rid))
+            out.append({**row, "status": "rewritten", "new": c.label})
+        con.commit()
+        return out
+    finally:
+        con.close()
