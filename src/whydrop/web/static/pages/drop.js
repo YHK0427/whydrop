@@ -24,6 +24,8 @@ function showText(main, text) {
   box.focus(); box.select();
 }
 
+const word = (v) => { const k = `evv.${v}`, w = t(k); return w === k ? String(v) : w; };   // "upload" → "업로드"; codes stay
+
 function frozenPath(d, link) {
   const down = new Set(d.home ? ["wifi"] : d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
   const first = d.slow ? -1 : ORDER.findIndex(s => down.has(s));   // a slow hop doesn't hide the ones after it
@@ -116,7 +118,7 @@ export async function mount(main, { id, refresh }) {
     h("section", { class: "panel split" },
       h("div", {}, h("h2", {}, t("drop.evidence")), evRows.length ? h("dl", { class: "kv" },
         evRows.flatMap(([k, v]) => [h("dt", {}, t(`ev.${k}`) === `ev.${k}` ? k : t(`ev.${k}`)),
-          h("dd", {}, Array.isArray(v) ? v.join(", ") || "–" : String(v))])) : h("p", { class: "faint" }, "–")),
+          h("dd", {}, Array.isArray(v) ? v.map(word).join(", ") || "–" : word(v))])) : h("p", { class: "faint" }, "–")),
       h("div", {}, h("h2", {}, t("drop.history")),
         h("p", {}, d.changed ? t("drop.changed", { rule: d.provisional || "?" }) : t("drop.unchanged")),
         h("h2", {}, t("drop.annotations")), ann.length ? h("ul", { class: "drops" }, ann.map(a => h("li", {},

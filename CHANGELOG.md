@@ -7,6 +7,10 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 ### Fixed
 - The 6 h, 24 h and 7 d charts were empty for the first 7 days: 1-minute aggregates were only made from 1-second rows older than 7 days. They are now made as data comes in, 5 minutes behind, and the long views read them together with the latest 1-second rows, counting each second once.
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.
+- The Korean dashboard and summary showed the *In protocol terms* paragraph and evidence values (upload, download) in English. New drops store the paragraph in both languages; drops recorded before keep the English one.
+- The public demo's protocol page said packets appear once precision mode is on, with a pause button and an empty table. It now says the demo has no packets and links the protocol document.
+- NAT chart: the UDP label could sit on the TCP line.
+- Korean text wrapped inside words (for example "(추 / 정)"), and table headers stacked on a phone.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23

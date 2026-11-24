@@ -30,10 +30,9 @@ class FakeDns(asyncio.DatagramProtocol):
 
 
 async def fake_dns(rcode=0):
+    from helpers.ports import tcp_then_udp
     loop = asyncio.get_running_loop()
     proto = FakeDns(rcode)
-    t, _ = await loop.create_datagram_endpoint(lambda: proto, local_addr=("127.0.0.1", 0), family=socket.AF_INET)
-    port = t.get_extra_info("sockname")[1]
 
     async def tcp(r, w):
         n = int.from_bytes(await r.readexactly(2), "big")
@@ -41,7 +40,9 @@ async def fake_dns(rcode=0):
         w.write(len(a).to_bytes(2, "big") + a)
         await w.drain()
         w.close()
-    srv = await asyncio.start_server(tcp, "127.0.0.1", port, family=socket.AF_INET)
+    srv, (t, _), port = await tcp_then_udp(
+        lambda p: asyncio.start_server(tcp, "127.0.0.1", p, family=socket.AF_INET),
+        lambda p: loop.create_datagram_endpoint(lambda: proto, local_addr=("127.0.0.1", p), family=socket.AF_INET))
     return t, srv, port
 
 

@@ -273,14 +273,11 @@ async def _reflector(secret=SECRET):
     from whydrop.reflector.replay import Tombstones
     from whydrop.reflector.tcp import TcpReflector, serve_tcp
     from whydrop.reflector.udp import UdpReflector, serve_udp
-    for _ in range(20):   # one number for both: TCP first, since Windows reserves TCP blocks inside the UDP range
-        t = await serve_tcp(TcpReflector(secret.encode(), epoch=3), "127.0.0.1", 0)
-        try:
-            port = t.sockets[0].getsockname()[1]
-            return await serve_udp(UdpReflector(secret.encode(), epoch=3, tombstones=Tombstones(None)), "127.0.0.1", port), t
-        except OSError:   # that UDP port is in use
-            t.close()
-    raise OSError("no port free for both UDP and TCP")
+    from helpers.ports import tcp_then_udp
+    t, u, _ = await tcp_then_udp(lambda p: serve_tcp(TcpReflector(secret.encode(), epoch=3), "127.0.0.1", p),
+                                 lambda p: serve_udp(UdpReflector(secret.encode(), epoch=3, tombstones=Tombstones(None)),
+                                                     "127.0.0.1", p))
+    return u, t
 
 
 def precision_cfg(tmp_path, monkeypatch, port=9):   # with a reflector, run_with puts the port it really got

@@ -241,6 +241,7 @@ def test_protocol_story_is_in_the_page_language(browser, base):
         assert not errors, errors
     assert texts["en"].startswith("UDP: sent seq 1201–1660") and "all lost upstream" in texts["en"]
     assert "모두 올라가는 길에서" in texts["ko"], texts["ko"]
+    assert "upload" not in main and "업로드" in main                      # evidence values too, not only the paragraph
     english = re.findall(r"[A-Za-z]{4,} [a-z]{3,}", main)   # the whole Korean page: no English sentence anywhere
     assert not english, english
 
@@ -318,4 +319,32 @@ def test_nat_labels_do_not_overlap(browser, base):
     }""")
     ctx.close()
     assert hits[0] == 2 and hits[1] == [], hits
+
+
+BROKEN_WORDS = """() => {   // every space-separated word in headings, headers and sentences sits on one line
+  const out = [];
+  for (const el of document.querySelectorAll('main h1, main h2, main th, main p:not(.hex)')) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        const tops = new Set([...r.getClientRects()].filter(b => b.width > 0).map(b => Math.round(b.top)));
+        if (tops.size > 1) out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_korean_headline_does_not_break_inside_a_word(browser, base, width):
+    """Korean wrapped inside words: the headline's "(추정)" split as "(추 / 정)", the drops header "길이" as "길 / 이"."""
+    broken = {}
+    for route in ("#/", "#/drops", "#/drop/1", "#/nat", "#/network"):
+        ctx, page, _ = open_page(browser, base, route, lang="ko", width=width)
+        if words := page.evaluate(BROKEN_WORDS):
+            broken[route] = words
+        ctx.close()
+    assert not broken, broken
 
