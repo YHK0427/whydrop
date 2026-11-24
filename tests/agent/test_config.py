@@ -95,3 +95,15 @@ def test_addresses_must_be_ipv4(tmp_path, toml):
     p.write_text(toml)
     with pytest.raises(ConfigError):
         load_config(p, {})
+
+
+def test_every_interval_key_is_read():
+    """intervals.link was accepted and ignored: the link check runs every second by design."""
+    import re
+    from pathlib import Path
+
+    from whydrop.agent import config
+    run = (Path(config.__file__).parent / "run.py").read_text(encoding="utf-8")
+    used = set(re.findall(r'(?:iv|intervals)\[\s*"([a-z_]+)"', run)) | {"wifi"}   # wifi vs wifi_windows: picked by platform
+    assert set(config.DEFAULT_INTERVALS) == used
+

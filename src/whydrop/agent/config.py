@@ -39,7 +39,7 @@ DEFAULT_TARGETS = (
     Target("208.67.222.222", 443, "tcp", "tcp443", "opendns"),
 )
 
-DEFAULT_INTERVALS = {"wifi": 1.0, "wifi_windows": 2.0, "link": 1.0, "gateway": 1.0, "line_hb": 1.0, "dns": 5.0,
+DEFAULT_INTERVALS = {"wifi": 1.0, "wifi_windows": 2.0, "gateway": 1.0, "line_hb": 1.0, "dns": 5.0,
                      "dns_tcp": 5.0, "stun": 10.0, "tcp_connect": 2.0, "host_net": 1.0}
 
 
