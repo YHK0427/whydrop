@@ -9,7 +9,9 @@ import sqlite3
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from typing import Annotated
+
+from fastapi import FastAPI, HTTPException, Path as FPath, Request, WebSocket
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -44,6 +46,10 @@ def _dumps(obj) -> bytes:
     return json.dumps(obj, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
 
 
+MAX_MS = 2**53                                   # far past any real time, well inside SQLite integers
+IncidentId = Annotated[int, FPath(ge=1, le=MAX_MS)]
+
+
 def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str], public_default: bool,
                status=None, nat_run=None, nat_state=None, packets=None, clock=None) -> FastAPI:
     """clock: epoch-ms source; export-static pins it to the end of the exported range."""
@@ -69,8 +75,8 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             frm = int(q.get("from") or to - default_ms)
         except ValueError:
             raise HTTPException(400, "from/to are epoch milliseconds")
-        if frm >= to:
-            raise HTTPException(400, "from must be before to")
+        if not 0 <= frm < to <= MAX_MS:   # SQLite integers end at 2^63: past that a query raised (a 500)
+            raise HTTPException(400, "from must be before to, both epoch milliseconds")
         return frm, to
 
     async def reply(request: Request, fetch, kind: str | None = None, *, one: bool = False, headers=None) -> Response:
@@ -139,18 +145,18 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         return await reply(request, lambda: Q.overlapping(db_path, "incidents", frm, to), "incident")
 
     @app.get("/api/incidents/{iid}")
-    async def get_incident(iid: int, request: Request):
+    async def get_incident(iid: IncidentId, request: Request):
         return await reply(request, lambda: [r for r in [Q.incident(db_path, iid)] if r], "incident", one=True)
 
     @app.get("/api/incidents/{iid}/summary")
-    async def get_summary(iid: int, request: Request):
+    async def get_summary(iid: IncidentId, request: Request):
         text = await asyncio.to_thread(X.summary, db_path, iid, request.query_params.get("lang", "en"), is_public(request), _now())
         if text is None:
             raise HTTPException(404, "no such drop")
         return PlainTextResponse(text)
 
     @app.get("/api/incidents/{iid}/strip")
-    async def get_strip(iid: int, request: Request):
+    async def get_strip(iid: IncidentId, request: Request):
         """Per-packet record kept ±60 s around the drop (precision mode only)."""
         def fetch():
             inc = Q.incident(db_path, iid)
@@ -221,6 +227,8 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             body = await request.json()
             start = int(body["start_ms"])
             end = int(body["end_ms"]) if body.get("end_ms") is not None else None
+            if not 0 <= start <= MAX_MS or (end is not None and not start <= end <= MAX_MS):
+                raise ValueError("start_ms/end_ms must be epoch milliseconds, start first")
             rid = await asyncio.to_thread(Q.add_annotation, db_path, start, end, str(body.get("label")), body.get("note"))
         except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as e:
             raise HTTPException(400, str(e) or "bad annotation")
@@ -235,7 +243,7 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         return await reply(request, lambda: packets() if packets else [], "packet")
 
     @app.get("/api/export/bugreport/{iid}")
-    async def get_bugreport(iid: int, request: Request):
+    async def get_bugreport(iid: IncidentId, request: Request):
         def work():
             rep = X.bugreport(db_path, iid, _now())
             return None if rep is None else _dumps(rep)

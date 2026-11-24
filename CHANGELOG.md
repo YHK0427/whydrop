@@ -25,6 +25,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - Alerts: at most 12 delivered an hour, retries included (the next one says how many were held), at most 100 waiting for retry, and a retry that fails again is saved with its backoff so a restart doesn't start the backoff over.
 - A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
 - The analysis kept only the later part of a second written in two parts, so a loss in the first part could vanish from the verdict.
+- The dashboard API answered times or drop ids past 2^63 (or negative times) with a 500; they are now a 400.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
 

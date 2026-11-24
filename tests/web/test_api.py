@@ -174,3 +174,17 @@ def test_korean_summary_uses_the_korean_protocol_story(tmp_path):
     assert "프로토콜로 보면: TCP: HB에 응답이 없었어요." in c.get(f"/api/incidents/{iid}/summary?lang=ko").text
     assert "In protocol terms: TCP: HB got no reply." in c.get(f"/api/incidents/{iid}/summary").text
 
+
+
+def test_numbers_past_sqlite_integers_are_a_400_not_a_500(db):
+    """L6 audit: from/to, incident ids and annotation times beyond 2^63 reached SQLite and came back as 500s."""
+    c = TestClient(create_app(db, Bus(), token=None, allowed_hosts=["testserver"], public_default=False),
+                   raise_server_exceptions=False)
+    big = "99999999999999999999"
+    for path in (f"/api/samples?from=-1&to={big}", f"/api/chart?from=0&to={big}", f"/api/events?from=0&to={big}",
+                 f"/api/annotations?from=0&to={big}", f"/api/conditions?from=0&to={big}", f"/api/incidents?from=0&to={big}",
+                 f"/api/export/events.csv?from=0&to={big}", f"/api/incidents/{big}", f"/api/incidents/{big}/strip",
+                 f"/api/incidents/{big}/summary", f"/api/export/bugreport/{big}", "/api/chart?from=-5&to=10"):
+        assert c.get(path).status_code in (400, 422), path
+    r = c.post("/api/annotations", json={"start_ms": int(big), "label": "user-test"}, headers=H)
+    assert r.status_code == 400
