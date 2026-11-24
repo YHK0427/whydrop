@@ -123,3 +123,10 @@ def test_static_demo_has_the_korean_summary(tmp_path):
     en = (tmp_path / "site" / "data" / "incidents_1_summary.json").read_text(encoding="utf-8")
     assert "추정 원인: ISP 구간의 회선 끊김 (추정)" in ko and "Likely cause:" in en, ko
 
+
+
+def test_static_demo_has_the_isp_report_page_data(tmp_path):
+    st = build(tmp_path)
+    export_static(tmp_path / "w.db", tmp_path / "site", None, st["now_ms"], {"mode": "precision"})
+    d = json.loads((tmp_path / "site" / "data" / "isp-report.json").read_text(encoding="utf-8"))
+    assert d["to_ms"] == st["now_ms"] and "events" in d and d["days"]

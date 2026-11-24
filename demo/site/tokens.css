@@ -188,3 +188,52 @@ dl.kv dt, dl.kv dd, table.data td { overflow-wrap: anywhere; }   /* grids and ta
 .why-list li.seen::before { content: "✓"; color: var(--good); }
 .why-list li.ruled::before { content: "✗"; color: var(--ink-3); }
 .why-list li.ruled { color: var(--ink-2); }
+
+/* Report for the ISP (#/isp): a document to hand over. The one bold thing is each row's pair of bars, in path order:
+   the router at that moment (full = it answered) next to what was lost beyond it. */
+.isp { max-width: 860px; padding: var(--s5) 0 var(--s6); }
+.isp-head { display: flex; justify-content: space-between; align-items: flex-end; gap: var(--s4); flex-wrap: wrap; }
+.isp-head h1 { margin: 0; font-size: 34px; font-weight: 760; letter-spacing: -0.03em; line-height: 1.1; }
+.isp-period { margin: var(--s2) 0 0; color: var(--ink-2); max-width: 70ch; }
+.isp-lead { margin: var(--s5) 0; font-size: 21px; font-weight: 560; line-height: 1.45; letter-spacing: -0.01em; max-width: 36em; }
+.isp-cal { margin: 0 0 var(--s5); }
+.isp-cal ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(22px, 1fr)); gap: 3px; }
+.isp-cal li { position: relative; height: 34px; background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.isp-cal li .recd { position: absolute; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--up) 22%, transparent); }
+.isp-cal li b { position: absolute; left: 0; right: 0; bottom: 2px; text-align: center; font-size: 10px; font-weight: 500; color: var(--ink-3); }
+.isp-cal li.ev::after { content: ""; position: absolute; top: 4px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--critical); }
+.isp-cal figcaption { margin-top: var(--s2); font-size: 13px; color: var(--ink-3); display: flex; align-items: center; gap: var(--s2); }
+.isp-cal .key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-left: var(--s3); }
+.isp-cal .key:first-child { margin-left: 0; }
+.isp-cal .key.recd { background: color-mix(in srgb, var(--up) 22%, transparent); border: 1px solid var(--rule); }
+.isp-cal .key.ev { border-radius: 50%; width: 8px; height: 8px; background: var(--critical); }
+.isp-table { width: 100%; border-collapse: collapse; margin: var(--s4) 0 var(--s5); }
+.isp-table th { text-align: left; font-size: 13px; font-weight: 600; color: var(--ink-2); padding: 0 var(--s3) var(--s2) 0; border-bottom: 1px solid var(--ink); }
+.isp-table td { padding: var(--s3) var(--s3) var(--s3) 0; border-bottom: 1px solid var(--rule); vertical-align: top; font-size: 14px; }
+.isp-table .when { white-space: nowrap; }
+.isp-table .len { white-space: nowrap; color: var(--ink-2); }
+.isp-table .side { width: 34%; }
+.isp-bar { display: block; height: 10px; margin: 2px 0 6px; background: var(--rule); border-radius: 2px; overflow: hidden; }
+.isp-bar .fill { display: block; height: 100%; }
+.isp-bar.good .fill { background: var(--good); }
+.isp-bar.bad .fill { background: var(--critical); }
+.isp-note { color: var(--ink-2); font-size: 14px; max-width: 75ch; margin: var(--s2) 0; }
+@media (max-width: 640px) {
+  .isp-head h1 { font-size: 27px; }
+  .isp-lead { font-size: 18px; }
+  .isp-table thead { display: none; }
+  .isp-table tr { display: grid; grid-template-columns: 1fr auto; border-bottom: 1px solid var(--rule); padding: var(--s2) 0; }
+  .isp-table td { border: 0; padding: var(--s1) 0; }
+  .isp-table .side { width: auto; grid-column: 1 / -1; }
+}
+@media print {
+  @page { size: A4; margin: 16mm 14mm; }
+  :root { --page: #fff; --surface: #fff; --ink: #000; --ink-2: #333; --ink-3: #555; --rule: #ccc; color-scheme: light; }
+  #head, .noprint, .sr { display: none !important; }
+  body { background: #fff; font-size: 12px; }
+  .isp { max-width: none; padding: 0; }
+  .isp-head h1 { font-size: 26px; }
+  .isp-lead { font-size: 16px; margin: var(--s4) 0; }
+  .isp-table tr { break-inside: avoid; }
+  .isp-bar, .isp-cal li, .isp-cal .key { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}

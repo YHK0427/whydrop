@@ -1,5 +1,5 @@
 // Drops (#/drops): every drop with filters by cause and segment (UI design doc §3).
-import { api, dur, errorPanel, h, parseIncident, STATIC, t, when } from "../lib.js";
+import { api, dur, errorPanel, h, parseIncident, t, when } from "../lib.js";
 
 export async function mount(main, { refresh }) {
   const q = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -24,7 +24,7 @@ export async function mount(main, { refresh }) {
   };
   const empty = h("p", { class: "empty" }, t("drops.none"));
   select.addEventListener("change", draw);
-  const isp = STATIC ? null : h("a", { class: "btn", href: "#/isp" }, t("drops.isp"));   // the report page
+  const isp = h("a", { class: "btn", href: "#/isp" }, t("drops.isp"));   // the report page
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("drops.title")),
     h("div", { class: "row" }, select, isp, segment ? h("span", { class: "faint" }, `${t("drops.col.where")}: ${segment}`) : null),
     h("table", { class: "data drops-table" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>

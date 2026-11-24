@@ -95,6 +95,7 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
         await grab("/api/status", key_for("/api/status"))
         for path in ("/api/findings", "/api/selfcheck", "/api/nat", "/api/packets"):
             await grab(path, key_for(path))
+        await grab("/api/isp-report", key_for("/api/isp-report"), {"format": "json"})   # the report page, as of the recording's end
         for span in LIST_SPANS:
             code, body = await grab("/api/incidents", key_for("/api/incidents", span), {"from": now - span * 1000, "to": now})
         incidents = json.loads(body) if code == 200 else []
