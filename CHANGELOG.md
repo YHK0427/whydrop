@@ -20,6 +20,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - Precision mode: one ECHO arriving more than 3 s out of order made the next ECHO look like the end of an outage and recorded a UDP outage with made-up download loss. An ECHO delayed from before a reflector restart was counted as a lost packet although it came back.
 - Precision mode: a canary whose TCP connection opened but whose handshake got no answer within 5 s recorded a "kernel timeout" (the kernel giving up on a connection). It is now a failed connection attempt, retried with the usual backoff.
+- `whydrop nat-test` said "no keepalive advice until the range is closed" also when every delay survived or none did, which more runs can't change. It now says "no keepalive needed below N s" or "keepalive below N s (the shortest delay tried)".
 
 ## [0.1.0] - 2026-11-23
 

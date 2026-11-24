@@ -173,6 +173,45 @@ def test_udp_and_tcp_run_together_and_errors_are_inconclusive(monkeypatch):
     assert abs(started[0][1] - started[1][1]) < 0.1  # TCP didn't wait for UDP
 
 
+def test_delay_the_reflector_refuses_is_inconclusive_and_results_come_as_they_finish():
+    got = []
+
+    async def main():
+        async def instant(d):
+            await asyncio.sleep(0.05)
+        srv = await serve_tcp(TcpReflector(S, epoch=1, sleep=instant), "127.0.0.1", 0)   # started without --enable-7500
+        port = srv.sockets[0].getsockname()[1]
+        rep = await nat_test(("127.0.0.1", port), S, udp_delays=(), tcp_delays=(60, 7500), sleep=fast_sleep,
+                             on_progress=got.append)
+        srv.close()
+        return rep
+    rep = asyncio.run(main())
+    assert [(r.delay_s, r.alive) for r in rep.tcp] == [(60, True), (7500, None)] and rep.tcp[1].detail["reason"] == "version"
+    assert [r.delay_s for r in got] == [7500, 60] and rep.tcp_range == (60, None)   # the refusal didn't wait for 60 s
+    assert "forgotten" not in format_report(rep)
+
+
+def test_unreachable_reflector_is_inconclusive_not_forgotten():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()                                       # nothing listens there, UDP or TCP
+    rep = asyncio.run(nat_test(("127.0.0.1", port), S, udp_delays=(10, 20), tcp_delays=(60,), sleep=fast_sleep))
+    assert all(r.alive is None for r in rep.udp + rep.tcp), [(r.delay_s, r.alive, r.detail) for r in rep.udp + rep.tcp]
+    assert rep.udp_range == rep.tcp_range == (None, None) and rep.keepalive_s == {"udp": None, "tcp": None}
+    assert format_report(rep).count("timeout not measured; no keepalive advice") == 2
+
+
+def test_report_when_nothing_or_everything_survives():
+    from whydrop.agent.precision.natprobe import NatReport
+    udp = [DelayResult("udp", 10, False), DelayResult("udp", 20, False)]
+    tcp = [DelayResult("tcp", 60, True), DelayResult("tcp", 300, True)]
+    rep = NatReport(udp, tcp, bracket(udp), bracket(tcp), {"udp": keepalive(*bracket(udp)), "tcp": keepalive(*bracket(tcp))})
+    text = format_report(rep)
+    assert "timeout less than 10 s; keepalive below 10 s (the shortest delay tried)" in text
+    assert "timeout more than 300 s; no keepalive needed below 300 s" in text
+
+
 def test_full_tcp_delay_set_stays_under_unauthenticated_cap():
     from whydrop.agent.precision.natprobe import TCP_DELAYS
 
