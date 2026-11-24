@@ -100,10 +100,10 @@ class FrameBuilder:
     def add_late(self, ts_ms: int, probe: str, pair: str, direction: str | None = None) -> None:
         """A late reply for a send in a frame not built yet (the store already wrote the row)."""
         r = self._rows.get(ts_ms, {}).get((probe, pair))
-        if r is None:
+        if r is None or r.lost <= 0:   # nothing left to turn into "late": a duplicate
             return
         r.late += 1
-        r.lost = max(0, r.lost - 1)
+        r.lost -= 1
         if direction:
             col = {"up": "lost_up", "down": "lost_down"}.get(direction, "lost_dir_unknown")
             setattr(r, col, max(0, getattr(r, col) - 1))

@@ -20,6 +20,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - The config now refuses values that parsed but misbehaved: `udp_stream.pps` outside 1–100 and intervals outside 0.5–3600 s (which could hammer the router or public servers), a `notify.format` typo (alerts silently went out as JSON), non-http(s) alert URLs, target or `web.bind` ports outside 1–65535, a negative `storage.min_free_mb` and an `agent_name` over 64 characters.
 - An empty host, port 0 or an IPv6 address in `reflector` now turns precision mode off with the reason, as `host:abc` already did, instead of starting precision mode against an address it can't use (the sockets are IPv4).
 - Alerts: at most 12 an hour (the next one says how many were held), at most 100 waiting for retry, and a retry that fails again is saved with its backoff so a restart doesn't start the backoff over.
+- A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23
