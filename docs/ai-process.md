@@ -117,7 +117,7 @@ The owner looked at the finished project and said it was full of errors: every f
 | Replay writes | `whydrop replay --write` rewrites stored verdicts after a backup. Its first run on the home database paired a stored router drop with a DNS drop that only overlapped in time, then left stale "router problem" verdicts because the segments differed; both rules were fixed on the real output before the home database was rewritten | Rewrite past verdicts (with a backup), keep the original video |
 | Submission | Report, demo, GIFs and a new captions-only promo video recorded from the re-exported demo | No voice-over, captions only, service-intro style |
 
-Counts: 46 review and audit agents in all, roughly 600 findings; this audit fixed 37 user-visible defects (CHANGELOG 0.2.0) and the test suite grew from about 550 to 833 tests.
+Counts: 47 review and audit agents in all, roughly 600 findings; this audit fixed 37 user-visible defects (CHANGELOG 0.2.0), a final whole-repo review six more (0.2.1, among them Compose silently overriding `whydrop.toml` and drops settled by a restart never alerting), and the test suite grew from about 550 to 836 tests.
 
 What the agent got wrong and caught on real data or in review:
 - It claimed `host:abc` as a reflector address crashed precision start-up; an existing test showed it was already handled (precision off with the reason). The config check was moved back to that path.
