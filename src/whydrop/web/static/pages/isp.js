@@ -1,6 +1,6 @@
 // Report for the ISP (#/isp): only what happened beyond the router, each event set against the router at that moment.
 // Printable: "Save as PDF" prints the page alone (the print stylesheet hides the dashboard around it).
-import { api, dur, errorPanel, h, lang, t, toast } from "../lib.js";
+import { api, dur, errorPanel, h, lang, STATIC, t, toast } from "../lib.js";
 
 const pct = (x) => Math.round(x * 1000) / 10;
 const day = (ms) => new Intl.DateTimeFormat(lang, { year: "numeric", month: "long", day: "numeric" }).format(ms);
@@ -51,7 +51,7 @@ export async function mount(main, { refresh }) {
     d = await api("/api/isp-report?format=json");
     version = (await api("/api/status").catch(() => ({}))).version || "";
   } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
-  const text = h("button", { type: "button", class: "btn", onclick: async () => {
+  const text = STATIC ? null : h("button", { type: "button", class: "btn", onclick: async () => {   // the demo has no text endpoint
     let body;
     try { body = await api(`/api/isp-report?lang=${document.documentElement.lang}`); }
     catch (e) { toast(t("error.load", { what: t("isp.title"), code: e.code || "?" })); return; }
