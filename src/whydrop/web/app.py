@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from whydrop.web import export as X
+from whydrop.web import metrics as M
 from whydrop.web import queries as Q
 from whydrop.web.bus import Bus
 from whydrop.web.guard import Guard, HostGuard
@@ -44,6 +45,10 @@ def _wall_now() -> int:
 
 def _dumps(obj) -> bytes:
     return json.dumps(obj, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+
+
+def _month_start(now_ms: int) -> int:
+    return int(time.mktime(time.localtime(now_ms / 1000)[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)   # local time
 
 
 MAX_MS = 2**53                                   # far past any real time, well inside SQLite integers
@@ -100,11 +105,16 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     @app.get("/api/status")
     async def get_status(request: Request):
         st = {**(status() if status else {}), "public": is_public(request)}
-        frm = int(time.mktime(time.localtime(_now() / 1000)[:2] + (1, 0, 0, 0, 0, 0, -1)) * 1000)  # month start (local)
-        st["month"] = await asyncio.to_thread(Q.availability, db_path, frm, _now())
+        st["month"] = await asyncio.to_thread(Q.availability, db_path, _month_start(_now()), _now())
         if is_public(request):
             st = to_public(st, "status", _now()) | {"month": st["month"], "public": True}
         return Response(_dumps(st), media_type="application/json")
+
+    @app.get("/api/metrics")
+    async def get_metrics():
+        now = _now()
+        body = await asyncio.to_thread(M.render, db_path, status() if status else {}, now, _month_start(now))
+        return PlainTextResponse(body, media_type="text/plain; version=0.0.4; charset=utf-8")   # Prometheus text format
 
     @app.get("/api/chart")
     async def get_chart(request: Request):
