@@ -9,7 +9,6 @@ from whydrop.analysis.model import Context, Frame
 
 KINDS = ("loss", "weak_signal", "wifi_lan_loss", "agent_busy", "latency")
 RTT_SOURCES = ("tcp_connect", "stun", "line_hb", "udp_stream", "canary")  # no DNS (§6.4 R7)
-MIN_SENDS = 20                       # don't call 1 lost out of 3 a loss condition
 
 
 @dataclass
@@ -62,12 +61,12 @@ class Conditions:
         self.detail: dict[str, dict] = {}
 
     def line_hb_lossy(self) -> bool:
-        return self._hb.b >= MIN_SENDS and self._hb.a / self._hb.b >= K.LOSS_FRAC / 2
+        return self._hb.b >= K.LOSS_MIN_SENDS and self._hb.a / self._hb.b >= K.LOSS_FRAC / 2
 
     def loss_at_home(self) -> bool:
         """The router checks lose at least the loss bar and half as much as the line heartbeat over the same 60 s
         (in both modes): the loss starts at home. A router that never answers can't tell home from line."""
-        if self._gw.b < MIN_SENDS or self._gw.a >= self._gw.b:
+        if self._gw.b < K.LOSS_MIN_SENDS or self._gw.a >= self._gw.b:
             return False
         gw = self._gw.a / self._gw.b
         line = self._hb.a / self._hb.b if self._hb.b else 0.0
@@ -125,7 +124,7 @@ class Conditions:
                     self._loss.add(t, r.lost + r.late, judged)
                 if p == "line_hb" and self.ctx.usable(p, pair) and judged > 0:
                     self._hb.add(t, r.lost + r.late, judged)
-        loss = self._loss.a / self._loss.b if self._loss.b >= MIN_SENDS else 0.0
+        loss = self._loss.a / self._loss.b if self._loss.b >= K.LOSS_MIN_SENDS else 0.0
         on = loss >= (K.LOSS_FRAC / 2 if self.active("loss") or self._since["loss"] else K.LOSS_FRAC)  # hysteresis
         out += self._set("loss", on, t, {"loss": round(loss, 3)})
 
@@ -142,7 +141,7 @@ class Conditions:
         while self._rssi and self._rssi[0][0] <= t - 3_600_000:
             self._rssi.popleft()
         weak = False
-        if dbm is not None and len(self._rssi) >= 60:
+        if dbm is not None and len(self._rssi) >= K.WEAK_MIN_SAMPLES:
             med = _pct([x[1] for x in self._rssi], 0.5)
             weak = dbm <= K.WEAK_DBM and med - dbm >= K.WEAK_BELOW_MEDIAN_DB
         if dbm is not None:
@@ -152,7 +151,7 @@ class Conditions:
         gw = frame.samples.get(("gateway", "gateway"))
         if usable and not outage and gw is not None and (wifi is None or wifi.ok) and gw.sent - gw.local_fail > 0:
             self._gw.add(t, gw.lost, gw.sent - gw.local_fail)
-        gw_loss = self._gw.a / self._gw.b if self._gw.b >= MIN_SENDS else 0.0
+        gw_loss = self._gw.a / self._gw.b if self._gw.b >= K.LOSS_MIN_SENDS else 0.0
         out += self._set("wifi_lan_loss", gw_loss >= K.WIFI_LAN_LOSS_FRAC, t, {"gateway_loss": round(gw_loss, 3)})
 
         # agent host busy: loop-lag p95 ≥ 10 ms over 30 s

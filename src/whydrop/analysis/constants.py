@@ -5,10 +5,6 @@ MAX_TIMEOUT_S = 3                # the longest probe timeout (dns_tcp, canary st
 MAX_BACKLOG_S = 600              # frames are never built further back than this (old or skewed timestamps)
 LAG_SPAN_CAP_S = 600             # an agent_lag whose end never arrived stops counting after this
 
-# probe timeouts (seconds) — a send is judged only once its timeout has passed
-TIMEOUT_S = {"line_hb": 1.0, "stun": 1.0, "dns": 2.0, "dns_tcp": 3.0, "tcp_connect": 1.5, "gateway": 1.5,
-             "udp_stream": 2.0, "canary": 3.0}
-
 # segments (§6.2)
 LOCAL_STALE_S = 60               # a down local segment whose probe stopped reporting this long is unknown again
 LOCAL_HOLD_S = 3                 # host_net / wifi / link: down after, and recovered after, 3 s held
@@ -31,8 +27,10 @@ RESUME_GRACE_S = 30              # no decisions until resume + 30 s
 LOSS_STREAM_WINDOW_S = 30
 LOSS_BASIC_WINDOW_S = 60
 LOSS_FRAC = 0.05
+LOSS_MIN_SENDS = 20              # don't call 1 lost out of 3 a loss condition
 WEAK_DBM = -75
 WEAK_BELOW_MEDIAN_DB = 10
+WEAK_MIN_SAMPLES = 60            # signal readings in the hour before "weak" can be judged against their median
 WIFI_LAN_LOSS_FRAC = 0.10
 WIFI_LAN_WINDOW_S = 60
 BUSY_LAG_MS = 10
@@ -54,6 +52,7 @@ SETTLE_S = 80
 # causes (§6.4)
 R1A_BEFORE_S, R1A_AFTER_S = 5, 15
 R1C_WINDOW_S = 5
+ROAM_LOSS_WINDOW_S = 5           # a roam with loss within ±5 s is a point event
 R4_AFTER_S = 60
 R5_MARGIN_S = 5
 NAT_RESET_WINDOW_S = 10

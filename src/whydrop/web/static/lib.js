@@ -25,6 +25,7 @@ export function staticKey(path) {   // mirrors static_export.key_for
     k += "_" + SPANS.reduce((a, b) => (Math.abs(b - span) < Math.abs(a - span) ? b : a));
   }
   if (qs.get("kind")) k += `_${qs.get("kind")}`;
+  if (qs.get("lang") === "ko") k += "_ko";
   return `data/${k}.json`;
 }
 
@@ -138,7 +139,7 @@ export function parseIncident(r) {
   const rule = r.cause_final || r.primary_cause || r.cause;
   return { id: r.id, start, end, open: end == null, segs, raw: tags.segments || [], point: tags.point, tags: tags.tags || [],
            home, slow: String(rule || "").startsWith("R7"),   // queueing slows a path down; it doesn't cut it
-           chain: tags.chain || [], label: cause(ev.label || ""), next: cause(ev.next_step || ""), protocol: ev.protocol || "",
+           chain: tags.chain || [], label: cause(ev.label || ""), next: cause(ev.next_step || ""), protocol: (lang === "ko" && ev.protocol_ko) || ev.protocol || "",
            rule, final: r.cause_final != null || r.final,
            changed: !!r.cause_changed, provisional: ev.provisional, evidence: ev };
 }

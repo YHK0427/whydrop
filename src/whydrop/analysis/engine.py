@@ -41,5 +41,6 @@ class Engine:
                 out.append(Change("incident", c, classify(c.incident, self.frames, self.cond, self.ctx)))
         for f in finals:
             f.incident.evidence["protocol"] = protocol_paragraph(f.incident)
+            f.incident.evidence["protocol_ko"] = protocol_paragraph(f.incident, "ko")
             out.append(Change("final", f, f.cause))
         return out

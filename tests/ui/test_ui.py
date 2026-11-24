@@ -111,9 +111,10 @@ def test_keyboard_path_reaches_every_control(browser, base):
         assert must in text, (must, text)
 
 
-def test_korean_phone_width_has_no_horizontal_scroll(browser, base):
+@pytest.mark.parametrize("lang", ["ko", "en"])   # en too: a nowrap header once pushed the English drops table out
+def test_phone_width_has_no_horizontal_scroll(browser, base, lang):
     for name, route in SCREENS.items():
-        ctx, page, _ = open_page(browser, base, route, lang="ko", width=360)
+        ctx, page, _ = open_page(browser, base, route, lang=lang, width=360)
         overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
         ctx.close()
         assert overflow <= 1, (name, overflow)
@@ -228,3 +229,123 @@ def test_in_home_verdict_draws_the_break_before_the_router(browser, base, lang, 
     assert words in head, head
     assert broken == 0, nodes
     assert [c.strip() for _, c in nodes] == ["node", "node warn", "node", "node", "node"], nodes   # Wi-Fi is the hop
+
+
+def test_protocol_story_is_in_the_page_language(browser, base):
+    """The Korean drop page printed the "In protocol terms" paragraph in English."""
+    texts = {}
+    for lang in ("en", "ko"):
+        ctx, page, errors = open_page(browser, base, "#/drop/1", lang=lang)
+        texts[lang] = page.inner_text("main p.protocol >> nth=-1")
+        main = page.inner_text("main")
+        ctx.close()
+        assert not errors, errors
+    assert texts["en"].startswith("UDP: sent seq 1201–1660") and "all lost upstream" in texts["en"]
+    assert "모두 올라가는 길에서" in texts["ko"], texts["ko"]
+    assert "upload" not in main and "업로드" in main                      # evidence values too, not only the paragraph
+    english = re.findall(r"[A-Za-z]{4,} [a-z]{3,}", main)   # the whole Korean page: no English sentence anywhere
+    assert not english, english
+
+
+@pytest.fixture(scope="module")
+def static_site(tmp_path_factory):
+    """The public demo as `whydrop export-static` writes it, served as plain files (GitHub Pages)."""
+    import functools
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    from fixture import build
+    from whydrop.web.static_export import export_static
+    d = tmp_path_factory.mktemp("demo")
+    def make():   # in a thread: Playwright owns this thread's event loop
+        export_static(d / "w.db", d / "site", None, build(d / "w.db", "precision")["now_ms"], {"mode": "precision"})
+    th = threading.Thread(target=make)
+    th.start()
+    th.join()
+    quiet = type("Q", (SimpleHTTPRequestHandler,), {"log_message": lambda *a: None})
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(quiet, directory=str(d / "site")))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}"
+    srv.shutdown()
+
+
+@pytest.mark.parametrize("lang", ["en", "ko"])
+def test_static_protocol_page_says_packets_are_not_in_the_demo(browser, static_site, lang):
+    """The demo's protocol page said packets fill in once precision mode is on (they never do there), with a pause
+    button that did nothing and an empty table."""
+    ctx, page, errors = open_page(browser, static_site, "#/protocol", lang=lang)
+    text = page.inner_text("main")
+    buttons, tables = page.locator("main button").count(), page.locator("main table").count()
+    href = page.get_attribute("main a", "href")
+    ctx.close()
+    assert not errors, errors
+    assert buttons == 0 and tables == 0, text
+    assert ("no real packets" if lang == "en" else "실제 패킷을 넣지 않았어요") in text, text
+    assert href.endswith("docs/protocol.md" if lang == "en" else "docs/protocol.ko.md")
+
+
+def test_nat_labels_do_not_overlap(browser, base):
+    """With the home router's results the UDP label sat on the TCP line (both end at 'forgotten')."""
+    import json as _json
+    udp = [(10, 1), (20, 1), (30, 1), (45, 1), (60, 1), (90, 1), (120, 0), (180, 0), (300, 0), (600, 0)]
+    tcp = [(60, 1), (300, 1), (600, 0), (1200, 0), (1800, 0), (3600, 0)]
+    rows = [{"proto": p, "delay_s": d, "alive": a} for p, xs in (("udp", udp), ("tcp", tcp)) for d, a in xs]
+
+    def nat(route):
+        body = _json.loads(route.fetch().text())
+        body["results"] = rows
+        route.fulfill(content_type="application/json", body=_json.dumps(body))
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    page = ctx.new_page()
+    page.route(re.compile(r".*/api/nat(\?.*)?$"), nat)
+    page.goto(f"{base}/#/nat")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(400)
+    hits = page.evaluate("""() => {
+      const svg = document.querySelector('main svg[role=img]');
+      const labels = [...svg.querySelectorAll('text')].filter(x => ['UDP', 'TCP'].includes(x.textContent));
+      const paths = [...svg.querySelectorAll('path, line')];   // the other line, and the x axis
+      const out = [];
+      for (const lab of labels) {
+        const b = lab.getBBox();
+        const mine = lab.textContent === 'UDP' ? 'var(--udp)' : 'var(--tcp)';
+        for (const p of paths.filter(p => p.getAttribute('stroke') !== mine))
+          for (let x = b.x; x <= b.x + b.width; x += 1) for (let y = b.y; y <= b.y + b.height; y += 1) {   // 1 px: the line is 2.5
+            const pt = svg.createSVGPoint(); pt.x = x; pt.y = y;
+            if (p.isPointInStroke(pt)) { out.push([lab.textContent, x, y]); x = Infinity; break; }
+          }
+        for (const o of svg.querySelectorAll('text')) if (o !== lab) { const c = o.getBBox();   // tick labels too
+          if (b.x < c.x + c.width && c.x < b.x + b.width && b.y < c.y + c.height && c.y < b.y + b.height) out.push([lab.textContent, o.textContent]); }
+      }
+      return [labels.length, out];
+    }""")
+    ctx.close()
+    assert hits[0] == 2 and hits[1] == [], hits
+
+
+BROKEN_WORDS = """() => {   // every space-separated word in headings, headers and sentences sits on one line
+  const out = [];
+  for (const el of document.querySelectorAll('main h1, main h2, main th, main p:not(.hex)')) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      for (const m of n.textContent.matchAll(/\S+/g)) {
+        const r = document.createRange(); r.setStart(n, m.index); r.setEnd(n, m.index + m[0].length);
+        const tops = new Set([...r.getClientRects()].filter(b => b.width > 0).map(b => Math.round(b.top)));
+        if (tops.size > 1) out.push(m[0]);
+      }
+    }
+  }
+  return out;
+}"""
+
+
+@pytest.mark.parametrize("width", [390, 1280])
+def test_korean_headline_does_not_break_inside_a_word(browser, base, width):
+    """Korean wrapped inside words: the headline's "(추정)" split as "(추 / 정)", the drops header "길이" as "길 / 이"."""
+    broken = {}
+    for route in ("#/", "#/drops", "#/drop/1", "#/nat", "#/network"):
+        ctx, page, _ = open_page(browser, base, route, lang="ko", width=width)
+        if words := page.evaluate(BROKEN_WORDS):
+            broken[route] = words
+        ctx.close()
+    assert not broken, broken
+

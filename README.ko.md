@@ -59,6 +59,8 @@ docker compose exec whydrop whydrop nat-test
 
 경로에 있는 NAT와 방화벽이 쉬고 있는 UDP 매핑(10초~10분)과 TCP 연결(1분~1시간)을 얼마나 기억하는지 모든 대기 시간을 동시에 재고, keepalive를 권해 줘요. 예를 들면 *"timeout between 90 s and 120 s; keepalive 70 s or less"*(실제 집 공유기의 결과)처럼요. 정밀 모드가 필요해요.
 
+옵션: `--udp-only`, `--tcp-only`, `--max-delay N`(N초보다 긴 대기는 건너뜀), `--enable-7500`(RFC 5382가 최소로 정한 2시간 4분보다 조금 긴 7500초 TCP도 시험. reflector도 `--enable-7500`으로 켜야 해요). `whydrop.toml`의 `[nat] enable_7500 = true`는 이 명령과 대시보드의 NAT 테스트 버튼 모두에 같은 효과를 내요.
+
 ## 설정
 
 모두 선택 사항이에요. 설정은 `WHYDROP_*` 환경 변수(`compose.yaml` 옆의 `.env`), 그다음 `whydrop.toml`, 그다음 기본값 순서로 정해져요. 모든 키는 [`whydrop.example.toml`](whydrop.example.toml)에, 환경 변수는 [`.env.example`](.env.example)에 있어요. 알림과 대부분의 조정은 `whydrop.toml`에만 있어요. Docker라면 `compose.yaml` 옆에 두고 `volumes:` 아래에 `- ./whydrop.toml:/app/whydrop.toml:ro`를 더하세요.
@@ -69,6 +71,7 @@ docker compose exec whydrop whydrop nat-test
 | `WHYDROP_SECRET` | 공유 비밀값, 32바이트 이상. 환경 변수로만 주고, 레포의 파일에는 절대 넣지 마세요 |
 | `WHYDROP_WEB_BIND` | 대시보드 주소. compose 기본값은 `0.0.0.0:8790`이고, 로컬에서만 보려면 `127.0.0.1:8790` |
 | `WHYDROP_UI_TOKEN` | 직접 정한 대시보드 토큰(없으면 만들어서 로그에 한 번 보여 줘요) |
+| `WHYDROP_AGENT_NAME` | 대시보드 머리글과 알림 제목에 쓰는 이 에이전트의 이름(기본 `home`) |
 
 ## 대시보드 보는 법
 
@@ -81,7 +84,7 @@ docker compose exec whydrop whydrop nat-test
 
 ## 알림과 내보내기
 
-- 웹훅(`notify.webhook_url`, 형식 `json`, `ntfy`, `discord`)은 **끊김이 확정될 때**, 즉 끝나고 80초 뒤(와이파이·케이블·공유기가 끊겼던 경우 120초 뒤)에 보내요. 끊긴 회선으로는 어차피 아무것도 보낼 수 없으니까요. 실패하면 24시간 동안 다시 시도해요. 내용은 공개 보기를 써요.
+- 웹훅(`notify.webhook_url`, 형식 `json`, `ntfy`, `discord`)은 **끊김이 확정될 때**, 즉 끝나고 80초 뒤(와이파이·케이블·공유기가 끊겼던 경우 120초 뒤)에 보내요. 끊긴 회선으로는 어차피 아무것도 보낼 수 없으니까요. 실패하면 24시간 동안 다시 시도해요. 내용은 공개 보기를 써요. `notify.lang = "ko"`면 대시보드와 같은 한국어로 보내고, 제목에는 에이전트 이름(`agent_name`)이 들어가요.
 - 선택: Uptime Kuma push 하트비트(`notify.kuma_push_url`).
 - 내보내기: 끊김, 불안정 구간, 이벤트, 1분 집계를 CSV나 JSON으로. 끊김별 버그 리포트(공개 보기, 앞뒤 10분). `whydrop replay`는 기록된 DB로 분석을 다시 돌리고, `whydrop export-static`은 읽기 전용 공개 데모를 만들어요.
 

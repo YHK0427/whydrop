@@ -59,6 +59,8 @@ docker compose exec whydrop whydrop nat-test
 
 Measures how long the NAT and firewalls on your path keep an idle UDP mapping (10 s – 10 min) and an idle TCP connection (1 min – 1 h), all delays in parallel, and recommends a keepalive: for example *"timeout between 90 s and 120 s; keepalive 70 s or less"* (a real home router). Needs precision mode.
 
+Options: `--udp-only`, `--tcp-only`, `--max-delay N` (skip delays over N seconds), `--enable-7500` (also try 7500 s TCP, just over the 2 h 4 min that RFC 5382 sets as the minimum; the reflector must be started with `--enable-7500` too). `[nat] enable_7500 = true` in `whydrop.toml` does the same for this command and for the dashboard's NAT test button.
+
 ## Configuration
 
 Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](https://github.com/YHK0427/whydrop/blob/main/whydrop.example.toml) documents every key; [`.env.example`](https://github.com/YHK0427/whydrop/blob/main/.env.example) the environment. Alerts and most tuning live only in `whydrop.toml`: with Docker, put it next to `compose.yaml` and add `- ./whydrop.toml:/app/whydrop.toml:ro` under `volumes:`.
@@ -69,6 +71,7 @@ Everything is optional. Settings come from `WHYDROP_*` environment variables (in
 | `WHYDROP_SECRET` | shared secret, ≥ 32 bytes; environment only, never in a file in the repo |
 | `WHYDROP_WEB_BIND` | dashboard address; the compose default is `0.0.0.0:8790`, use `127.0.0.1:8790` to keep it local |
 | `WHYDROP_UI_TOKEN` | your own dashboard token (otherwise one is generated and logged once) |
+| `WHYDROP_AGENT_NAME` | this agent's name in the dashboard header and alert titles (default `home`) |
 
 ## Reading the dashboard
 
@@ -81,7 +84,7 @@ The dashboard needs a token when it listens beyond localhost. `?public=1` switch
 
 ## Alerts and export
 
-- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h. Bodies use the public view.
+- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h. Bodies use the public view; `notify.lang = "ko"` sends them in the dashboard's Korean, and titles name the agent (`agent_name`).
 - Optional Uptime Kuma push heartbeat (`notify.kuma_push_url`).
 - Exports: drops, rough patches, events and minute aggregates as CSV or JSON; a per-drop bug report (public view, ±10 min); `whydrop replay` re-runs the analysis over a recorded database; `whydrop export-static` writes a read-only public demo of the dashboard.
 

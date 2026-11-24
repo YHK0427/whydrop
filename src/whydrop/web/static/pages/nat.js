@@ -22,6 +22,7 @@ function chart(byProto) {   // step lines of survival vs delay, log x axis, dire
   }
   root.append(svg("text", { x: 8, y: ly(1) + 4, fill: "var(--ink-3)", "font-size": 12 }, t("nat.alive")),
     svg("text", { x: 8, y: ly(0) + 4, fill: "var(--ink-3)", "font-size": 12 }, t("nat.forgotten")));
+  const ends = Object.fromEntries(Object.entries(byProto).map(([p, rows]) => [p, rows.reduce((a, r) => (!a || r.delay_s > a.delay_s ? r : a), null)]));
   for (const [proto, rows] of Object.entries(byProto)) {
     const color = proto === "udp" ? "var(--udp)" : "var(--tcp)";
     const pts = rows.slice().sort((a, b) => a.delay_s - b.delay_s);
@@ -31,7 +32,11 @@ function chart(byProto) {   // step lines of survival vs delay, log x axis, dire
     for (const r of pts) root.append(svg("circle", { cx: lx(r.delay_s), cy: r.alive == null ? (ly(1) + ly(0)) / 2 : ly(r.alive), r: 5,
       fill: r.alive == null ? "var(--surface)" : color, stroke: color, "stroke-width": 2 }));
     const last = pts[pts.length - 1];
-    if (last) root.append(svg("text", { x: lx(last.delay_s) + 10, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + 4,
+    const mine = ends[proto], level = (r) => (r.alive == null ? null : !!r.alive);
+    const passed = Object.entries(ends).some(([p, e]) => p !== proto && e && mine && level(e) === level(mine)
+      && (e.delay_s > mine.delay_s || (e.delay_s === mine.delay_s && p < proto)));
+    const off = passed ? -9 : 4;   // another line runs on past this end at its level: label above it, else beside the end
+    if (last) root.append(svg("text", { x: lx(last.delay_s) + 6, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + off,
       fill: "var(--ink)", "font-size": 13, "font-weight": 600 }, proto.toUpperCase()));
   }
   return root;

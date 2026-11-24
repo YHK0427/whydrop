@@ -155,3 +155,22 @@ def test_in_home_summary_names_the_home_network(tmp_path):
     assert "8 s, Home network" in c.get(f"/api/incidents/{iid}/summary").text
     assert "8초, 집 안 네트워크" in c.get(f"/api/incidents/{iid}/summary?lang=ko").text
     assert c.get(f"/api/incidents/{iid}?public=1").json()["evidence"]["cause_where"] == "home"   # the demo needs it too
+
+
+def test_korean_summary_uses_the_korean_protocol_story(tmp_path):
+    path = tmp_path / "w.db"
+
+    async def go():
+        s = Store(path)
+        await s.open()
+        await s.insert("incidents", start_ms=NOW - 9_000, end_ms=NOW - 1_000, primary_cause="R2", cause_final="R2",
+                       tags_json=json.dumps({"tags": [], "segments": ["line"], "chain": [], "point": None}),
+                       evidence_json=json.dumps({"label": "Line drop in the ISP segment (likely)", "cause": "R2",
+                                                 "protocol": "TCP: HB got no reply.", "protocol_ko": "TCP: HB에 응답이 없었어요."}))
+        await s.close()
+    asyncio.run(go())
+    c = client(path)
+    iid = c.get("/api/incidents").json()[0]["id"]
+    assert "프로토콜로 보면: TCP: HB에 응답이 없었어요." in c.get(f"/api/incidents/{iid}/summary?lang=ko").text
+    assert "In protocol terms: TCP: HB got no reply." in c.get(f"/api/incidents/{iid}/summary").text
+

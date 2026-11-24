@@ -50,6 +50,9 @@ def build(path: Path, mode: str = "precision", now_ms: int | None = None, outage
               "protocol": "UDP: sent seq 1201–1660; reflector recv_count +0 → all lost upstream. TCP: HB got no reply; "
                           "the kernel retransmitted 5 times (RTO 0.2 → 3.2 s); no RST, so the connection survived; "
                           "the first HB_ACK came after 44.0 s of silence.",
+              "protocol_ko": "UDP: seq 1201–1660 전송, reflector의 recv_count +0 → 모두 올라가는 길에서 사라졌어요. "
+                             "TCP: HB에 응답이 없었어요. 커널이 5번 재전송했어요(RTO 0.2 → 3.2초). "
+                             "RST가 없어 연결은 살아 있었어요. 44.0초 동안 조용하다가 첫 HB_ACK이 왔어요.",
               "cause_direction": "upload", "events": ["stall", "tcp_info", "udp_outage"]}
         await s.insert("incidents", start_ms=drop_a, end_ms=drop_a + 46_000, primary_cause="R2", cause_final="R2", cause_changed=0,
                        tags_json=json.dumps({"tags": [], "segments": ["line"], "chain": [], "point": None}),

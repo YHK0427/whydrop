@@ -63,7 +63,7 @@ class Segments:
         self._line_detail: dict = {}
         self._gated = False
         self._first_ok: int | None = None
-        self._stream_bad_prev = False
+        self._stream_run = 0   # seconds in a row the stream has been bad
         self.last_recovery_ms = -1                # last lan/line recovery: DNS attempts before it don't count
         self._local_up_ms = -1                    # last wifi/link/lan recovery: a line down never starts before it
         self._line_down_spans: deque = deque(maxlen=16)
@@ -129,7 +129,7 @@ class Segments:
             self.last_recovery_ms = frame.t_ms
             self._local_up_ms = max(self._local_up_ms, frame.t_ms)
         if frame.lag or frame.suspended:
-            self._stream_bad_prev = False
+            self._stream_run = 0
         else:
             out += self._step_line(frame)
             out += self._step_dns(frame)
@@ -177,18 +177,17 @@ class Segments:
             judged = r.sent - r.local_fail
             if judged <= 0:
                 continue                                 # only local send failures: that's host_net's business
-            if probe == "udp_stream":                    # ≥ 80 % loss for 2 s counts as a failed send
+            if probe == "udp_stream":                    # ≥ 80 % loss for STREAM_LOSS_S counts as a failed send
                 bad = (r.lost + r.late) >= K.STREAM_LOSS_FRAC * judged
-                failed, stream_bad = bad and self._stream_bad_prev, bad
-                if failed:                               # the run's first second counts too, once confirmed
-                    for x in reversed(self._q):
-                        if x[1] == "udp_stream":
-                            x[4] = True
-                            break
+                failed, stream_bad = bad and self._stream_run + 1 >= K.STREAM_LOSS_S, bad
+                if failed:                               # the run's earlier seconds count too, once confirmed
+                    earlier = [x for x in reversed(self._q) if x[1] == "udp_stream"][:K.STREAM_LOSS_S - 1]
+                    for x in earlier:
+                        x[4] = True
             else:
                 failed = r.ok == 0
             yield probe, pair, self.ctx.provider(probe, pair), failed, r
-        self._stream_bad_prev = stream_bad
+        self._stream_run = self._stream_run + 1 if stream_bad else 0
 
     def _link_ok(self) -> bool:
         link_seg = "wifi" if self.ctx.link_kind != "wired" else "link"

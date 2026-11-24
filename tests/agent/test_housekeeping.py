@@ -201,3 +201,32 @@ def test_a_clock_reset_far_back_does_not_recompute_minutes_whose_seconds_are_gon
         await s.close()
     run(main())
     assert count(tmp_path / "w.db", "select sum(sent) from samples_1m") == 10 * 8640   # every minute still whole
+
+
+def test_strip_events_and_minutes_have_an_end(tmp_path):
+    """The packet strip and events were never deleted (the docs said 90 days); minute rows grew 36 k a day forever."""
+    from whydrop.agent.events import Event
+
+    async def main():
+        s = await seeded(tmp_path / "w.db", [])
+        for age in (89, 91):
+            t = NOW - age * DAY
+            await s.executemany("INSERT INTO udp_seq_ring (agent_id, ts_ms, seq, echoed, dir) VALUES (1, ?, ?, 1, 'ok')",
+                                [(t, age)])
+            await s.add_events([Event("stall", t, "reflector", {"phase": "start"})])
+        for age in (364, 366):
+            await s.execute("INSERT INTO samples_1m (agent_id, ts_ms, probe, pair, sent, ok, lost, lost_up, lost_down, "
+                            "lost_dir_unknown, late, local_fail) VALUES (1, ?, 'line_hb', 'p', 60, 60, 0, 0, 0, 0, 0, 0)",
+                            (NOW - age * DAY,))
+        await s.flush()
+        await s.meta_set("rollup_until", str(NOW))                         # nothing to roll up here
+        await housekeep(s, NOW, free_bytes=lambda: (10**12, 10**12))
+        await s.close()
+    run(main())
+    p = tmp_path / "w.db"
+    assert count(p, "select group_concat(seq) from udp_seq_ring") == "89"
+    assert count(p, f"select count(*) from events where ts_ms < {NOW - 90 * DAY}") == 0
+    assert count(p, "select count(*) from events") == 1
+    assert count(p, f"select count(*) from samples_1m where ts_ms = {NOW - 364 * DAY}") == 1
+    assert count(p, "select count(*) from samples_1m") == 1
+

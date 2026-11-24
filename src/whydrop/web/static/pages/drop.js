@@ -24,6 +24,8 @@ function showText(main, text) {
   box.focus(); box.select();
 }
 
+const word = (v) => { const k = `evv.${v}`, w = t(k); return w === k ? String(v) : w; };   // "upload" → "업로드"; codes stay
+
 function frozenPath(d, link) {
   const down = new Set(d.home ? ["wifi"] : d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
   const first = d.slow ? -1 : ORDER.findIndex(s => down.has(s));   // a slow hop doesn't hide the ones after it
@@ -95,7 +97,7 @@ export async function mount(main, { id, refresh }) {
       t("drop.wrong")));
 
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);   // cause_X repeats the incident's own X
-  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "events", "cause_where"].includes(k)
+  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "protocol_ko", "events", "cause_where"].includes(k)
     && !(k.startsWith("cause_") && same(d.evidence[k.slice(6)], v)));
   const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });
@@ -116,7 +118,7 @@ export async function mount(main, { id, refresh }) {
     h("section", { class: "panel split" },
       h("div", {}, h("h2", {}, t("drop.evidence")), evRows.length ? h("dl", { class: "kv" },
         evRows.flatMap(([k, v]) => [h("dt", {}, t(`ev.${k}`) === `ev.${k}` ? k : t(`ev.${k}`)),
-          h("dd", {}, Array.isArray(v) ? v.join(", ") || "–" : String(v))])) : h("p", { class: "faint" }, "–")),
+          h("dd", {}, Array.isArray(v) ? v.map(word).join(", ") || "–" : word(v))])) : h("p", { class: "faint" }, "–")),
       h("div", {}, h("h2", {}, t("drop.history")),
         h("p", {}, d.changed ? t("drop.changed", { rule: d.provisional || "?" }) : t("drop.unchanged")),
         h("h2", {}, t("drop.annotations")), ann.length ? h("ul", { class: "drops" }, ann.map(a => h("li", {},

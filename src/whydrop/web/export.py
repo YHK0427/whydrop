@@ -74,10 +74,11 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: i
         when = f"{mins} min ago" if lang != "ko" else f"{mins}분 전"
         ev = {k: mask_text(v) if isinstance(v, str) else v for k, v in ev.items()}
     if lang == "ko":
-        lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"추정 원인: {ev.get('label', '-')}",
-                 f"다음에 할 일: {ev.get('next_step', '-')}"]
-        if ev.get("protocol"):
-            lines.append(f"프로토콜로 보면: {ev['protocol']}")
+        from whydrop.web.public import localized
+        lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"추정 원인: {localized(ev.get('label', '-'), 'ko')}",
+                 f"다음에 할 일: {localized(ev.get('next_step', '-'), 'ko')}"]
+        if ev.get("protocol"):   # rows from before 0.1.1 have only the English one
+            lines.append(f"프로토콜로 보면: {ev.get('protocol_ko') or ev['protocol']}")
     else:
         lines = [f"Drop: {when}, {dur:.0f} s, {where}", f"Likely cause: {ev.get('label', '-')}",
                  f"What to do next: {ev.get('next_step', '-')}"]

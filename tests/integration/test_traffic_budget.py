@@ -5,6 +5,7 @@ import asyncio
 import socket
 import struct
 
+from helpers.ports import tcp_then_udp
 from whydrop.agent import traffic
 from whydrop.agent.config import Target, load_config
 from whydrop.agent.probes import dns_probe, line_hb, tcp_connect
@@ -43,15 +44,14 @@ class StunServer(asyncio.DatagramProtocol):
 def measure() -> dict[str, int]:
     async def main():
         loop = asyncio.get_running_loop()
-        dt, _ = await loop.create_datagram_endpoint(DnsServer, local_addr=("127.0.0.1", 0), family=socket.AF_INET)
-        dport = dt.get_extra_info("sockname")[1]
-
         async def tcp(r, w):
             n = int.from_bytes(await r.readexactly(2), "big")
             a = answer(await r.readexactly(n))
             w.write(len(a).to_bytes(2, "big") + a)
             await w.drain()
-        dsrv = await asyncio.start_server(tcp, "127.0.0.1", dport, family=socket.AF_INET)
+        dsrv, (dt, _), dport = await tcp_then_udp(
+            lambda p: asyncio.start_server(tcp, "127.0.0.1", p, family=socket.AF_INET),
+            lambda p: loop.create_datagram_endpoint(DnsServer, local_addr=("127.0.0.1", p), family=socket.AF_INET))
         st, _ = await loop.create_datagram_endpoint(StunServer, local_addr=("127.0.0.1", 0), family=socket.AF_INET)
         sport = st.get_extra_info("sockname")[1]
         osrv = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0, family=socket.AF_INET)
@@ -113,8 +113,8 @@ def measure_precision() -> dict[str, float]:
             pass
 
     async def main():
-        u = await serve_udp(UdpReflector(S, epoch=1, tombstones=Tombstones(None)), "127.0.0.1", 0)
-        t = await serve_tcp(TcpReflector(S, epoch=1), "127.0.0.1", u.port)
+        t, u, _ = await tcp_then_udp(lambda p: serve_tcp(TcpReflector(S, epoch=1), "127.0.0.1", p),
+                                     lambda p: serve_udp(UdpReflector(S, epoch=1, tombstones=Tombstones(None)), "127.0.0.1", p))
         before = traffic.BYTES["udp_stream"]
         st = UdpStream(("127.0.0.1", u.port), S, Sink(), pps=10)
         await st.start()
@@ -125,7 +125,10 @@ def measure_precision() -> dict[str, float]:
         c = HotCanary(("127.0.0.1", u.port), S, lambda e: None, session_id=1, hb_s=0.1)
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
-        await asyncio.sleep(1.05)
+        for _ in range(50):   # ≥ 10 answered rounds: a loaded machine answers fewer in a fixed second, and the
+            await asyncio.sleep(0.1)   # handshake and unanswered HBs then land on too few rounds
+            if len(c._rtts) >= 10:
+                break
         stop.set()
         await task
         hb_round = (traffic.BYTES["canary"] - before) / max(1, len(c._rtts))  # an unanswered last HB only overcounts

@@ -34,7 +34,8 @@ async def _get(app, path: str, query: dict | None = None) -> tuple[int, bytes]:
     return out["status"], out["body"]
 
 
-def key_for(path: str, span: int | None = None, incident: int | None = None, kind: str | None = None) -> str:
+def key_for(path: str, span: int | None = None, incident: int | None = None, kind: str | None = None,
+            lang: str | None = None) -> str:
     """The data file name the static frontend asks for (mirrors lib.js staticKey)."""
     k = path.removeprefix("/api/").replace("/", "_")
     if incident is not None:
@@ -43,6 +44,8 @@ def key_for(path: str, span: int | None = None, incident: int | None = None, kin
         k += f"_{span}"
     if kind:
         k += f"_{kind}"
+    if lang == "ko":
+        k += "_ko"
     return k + ".json"
 
 
@@ -105,7 +108,8 @@ def export_static(db: Path, out: Path, from_ms: int | None = None, to_ms: int | 
             iid = inc["id"]
             await grab(f"/api/incidents/{iid}", key_for(f"/api/incidents/{iid}"))
             await grab(f"/api/incidents/{iid}/strip", key_for(f"/api/incidents/{iid}/strip"))
-            await grab(f"/api/incidents/{iid}/summary", key_for(f"/api/incidents/{iid}/summary"), {"lang": "en"})
+            for lang in ("en", "ko"):   # the copied summary, in the page's language
+                await grab(f"/api/incidents/{iid}/summary", key_for(f"/api/incidents/{iid}/summary", lang=lang), {"lang": lang})
             start = now + inc["start_s"] * 1000
             end = now + (inc["end_s"] if inc["end_s"] is not None else 0) * 1000
             q = {"from": int(start - 60_000), "to": int(end + 60_000)}
