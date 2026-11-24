@@ -116,7 +116,9 @@ def test_no_path_is_memory_only():
     assert t.get(1) == 5
 
 
-@pytest.mark.parametrize("content", ['{"v": 1, "t": []}', '{"v": 1, "t": {"1": [4, Infinity]}}'])
+@pytest.mark.parametrize("content", ['{"v": 1, "t": []}', '{"v": 1, "t": {"1": [4, Infinity]}}', "",
+                                     '{"v": 1, "t": {"1": [Infinity, 1]}}', '{"v": 1, "t": {"1": [1e400, 1]}}',
+                                     "[" * 100_000])  # empty, then values that made load() raise instead of start empty
 def test_odd_files_are_handled(tmp_path, content):
     p = tmp_path / "t.json"
     p.write_text(content)

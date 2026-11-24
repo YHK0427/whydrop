@@ -26,6 +26,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
 - The analysis kept only the later part of a second written in two parts, so a loss in the first part could vanish from the verdict.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
+- The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
 
 ## [0.1.0] - 2026-11-23
 

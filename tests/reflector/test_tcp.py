@@ -1,6 +1,8 @@
 """TCP reflector over real loopback sockets; role delays use an injected sleep."""
 import asyncio
 
+import pytest
+
 from whydrop.proto.wt import (
     Frame, FrameType, Hello, Role, WtType,
     decode_frame, decode_hello_ok, decode_nonce, decode_short, encode_frame, encode_hello,
@@ -221,20 +223,134 @@ def test_hot_junk_frames_do_not_hold_slot():
     run(main())
 
 
-def test_nat_slot_freed_when_agent_leaves():
+@pytest.mark.parametrize("role,param", [(Role.NAT, 60), (Role.IDLE, 30)])
+def test_slot_freed_when_agent_leaves(role, param):
     async def forever(d):
         await asyncio.Event().wait()
 
     async def main():
         r, srv, port = await _server(sleep=forever)
-        rd, wr = await _hello(port, role=Role.NAT, param=60)
+        rd, wr = await _hello(port, role=role, param=param)
         await rd.readexactly(16)
-        assert sum(len(s) for s in r._nat.values()) == 1
+        assert r._auth_total == 1
         wr.close()
         for _ in range(100):
-            if not r._nat:
+            if not r._auth_total:
                 break
             await asyncio.sleep(0.02)
-        assert r._nat == {}
+        assert r._nat == {} and r._single == {}
         srv.close()
     run(main())
+
+
+def test_unauth_cap_total(monkeypatch):
+    import whydrop.reflector.tcp as tcp
+
+    async def main():
+        monkeypatch.setattr(tcp, "UNAUTH_TOTAL", 2)  # below the per-IP cap, so only the total can refuse
+        r, srv, port = await _server()
+        held = []
+        for _ in range(2):
+            rd, wr = await asyncio.open_connection("127.0.0.1", port)
+            await rd.readexactly(20)
+            held.append(wr)
+        rd3, _ = await asyncio.open_connection("127.0.0.1", port)
+        assert await rd3.read(20) == b"" and r.drops["unauth_cap"] == 1
+        for wr in held:
+            wr.close()
+        srv.close()
+    run(main())
+
+
+def test_hot_busy_at_total_cap_but_replace_allowed(monkeypatch):
+    import whydrop.reflector.tcp as tcp
+
+    async def main():
+        monkeypatch.setattr(tcp, "AUTH_TOTAL", 1)
+        r, srv, port = await _server()
+        rd1, wr1 = await _hello(port, sid=1)  # hold the writers: a dropped one closes its connection
+        await rd1.readexactly(16)
+        rd2, wr2 = await _hello(port, sid=2)
+        assert decode_short(await rd2.readexactly(4)) == WtType.BUSY  # a new session over the cap
+        rd3, wr3 = await _hello(port, sid=1)
+        assert decode_hello_ok(await rd3.readexactly(16), S, AN) == EPOCH  # replacing its own slot is not
+        for wr in (wr1, wr2, wr3):
+            wr.close()
+        srv.close()
+    run(main())
+
+
+def test_slow_drip_hello_times_out():  # the 5 s covers the whole HELLO, not each byte
+    async def main():
+        r, srv, port = await _server(hello_timeout_s=0.3)
+        rd, wr = await asyncio.open_connection("127.0.0.1", port)
+        n = decode_nonce(await rd.readexactly(20))
+        try:
+            for b in encode_hello(Hello(Role.HOT, 1, 0, AN), S, n)[:-1]:
+                wr.write(bytes([b]))
+                await wr.drain()
+                await asyncio.sleep(0.05)
+        except ConnectionError:
+            pass
+        assert await _closed(rd) and r.drops["hello_timeout"] == 1 and not r._unauth
+        srv.close()
+    run(main())
+
+
+def test_hostile_input_never_kills_the_server(caplog):
+    import random
+    rnd = random.Random(3)
+
+    async def after_hello(port):
+        rd, wr = await _hello(port, sid=rnd.randrange(1 << 32))
+        await rd.readexactly(16)
+        return rd, wr
+
+    async def main():
+        r, srv, port = await _server(hot_idle_close_s=2)
+        for _ in range(20):
+            rd, wr = await asyncio.open_connection("127.0.0.1", port)
+            await rd.readexactly(20)
+            wr.write(rnd.randbytes(rnd.choice((5, 29, 30, 31, 200))))  # random, truncated and oversized HELLOs
+            wr.write_eof()
+            assert await _closed(rd)
+        for junk in (bytes([0x99]) + rnd.randbytes(15), encode_frame(Frame(FrameType.HB, 0, 1, 1))[:9]):
+            rd, wr = await after_hello(port)  # then an unknown frame type, or a truncated frame
+            wr.write(junk)
+            wr.write_eof()
+            assert await _closed(rd)
+        for _ in range(100):
+            if not r._auth_total and not r._unauth:
+                break
+            await asyncio.sleep(0.02)
+        assert r._auth_total == 0 and not r._unauth
+        rd, wr = await _hello(port)  # still serving
+        assert decode_hello_ok(await rd.readexactly(16), S, AN) == EPOCH
+        wr.close(); srv.close()
+    run(main())
+    assert "tcp handler failed" not in caplog.text
+
+
+def test_tune_sets_user_timeout_on_linux(monkeypatch):  # a half-open connection dies in 30 s, not ~15 min
+    import socket
+
+    import whydrop.reflector.tcp as tcp
+
+    class FakeSock:
+        opts = {}
+
+        def setsockopt(self, level, opt, value):
+            self.opts[opt] = value
+
+    class FakeWriter:
+        def __init__(self, sock):
+            self.sock = sock
+
+        def get_extra_info(self, name):
+            return self.sock
+
+    monkeypatch.setattr(tcp.sys, "platform", "linux")
+    sock = FakeSock()
+    tcp._tune(FakeWriter(sock))
+    tcp._tune(FakeWriter(None))  # transports without a socket are left alone
+    assert sock.opts[getattr(socket, "TCP_USER_TIMEOUT", 18)] == 30_000 and sock.opts[socket.TCP_NODELAY] == 1
