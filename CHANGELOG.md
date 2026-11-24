@@ -18,6 +18,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `[intervals] link` was accepted and ignored (the link check runs every second by design); it is now rejected as an unknown key.
 - Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
+- On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
 
 ## [0.1.0] - 2026-11-23
 

@@ -68,6 +68,27 @@ def test_dns_servfail_is_failure():
     assert not r.ok and r.detail["rcode"] == 2
 
 
+def test_udp_53_refused_but_tcp_53_answers():
+    async def main():
+        proto = FakeDns()
+
+        async def tcp(r, w):
+            n = int.from_bytes(await r.readexactly(2), "big")
+            a = proto.answer(await r.readexactly(n))
+            w.write(len(a).to_bytes(2, "big") + a)
+            await w.drain()
+            w.close()
+        srv = await asyncio.start_server(tcp, "127.0.0.1", 0, family=socket.AF_INET)
+        port = srv.sockets[0].getsockname()[1]  # nothing bound on UDP: the kernel answers port unreachable
+        u = await dns_probe.udp("127.0.0.1", "dns_isp", None, NOW, port=port)
+        k = await dns_probe.tcp("127.0.0.1", "dns_isp", None, NOW, port=port)
+        srv.close()
+        return u, k
+    u, k = asyncio.run(main())
+    assert not u.ok and not u.local_fail and u.detail.get("icmp")  # an ICMP reject, counted as such on every OS
+    assert k.ok and k.pair.endswith("/tcp")
+
+
 def test_router_cache_check_accepts_nxdomain():
     async def main():
         t, srv, port = await fake_dns(rcode=3)
