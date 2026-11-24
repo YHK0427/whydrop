@@ -286,4 +286,6 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")
     app.add_middleware(Guard, token=token)
     app.add_middleware(HostGuard, allowed_hosts=allowed_hosts)  # added last = runs first
+    import gc
+    gc.freeze()   # modules and the app live forever: full collections (which hold the GIL, so the probes' loop too) skip them
     return app
