@@ -25,6 +25,7 @@ export function staticKey(path) {   // mirrors static_export.key_for
     k += "_" + SPANS.reduce((a, b) => (Math.abs(b - span) < Math.abs(a - span) ? b : a));
   }
   if (qs.get("kind")) k += `_${qs.get("kind")}`;
+  if (qs.get("lang") === "ko") k += "_ko";
   return `data/${k}.json`;
 }
 

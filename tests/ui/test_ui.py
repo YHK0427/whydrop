@@ -111,9 +111,10 @@ def test_keyboard_path_reaches_every_control(browser, base):
         assert must in text, (must, text)
 
 
-def test_korean_phone_width_has_no_horizontal_scroll(browser, base):
+@pytest.mark.parametrize("lang", ["ko", "en"])   # en too: a nowrap header once pushed the English drops table out
+def test_phone_width_has_no_horizontal_scroll(browser, base, lang):
     for name, route in SCREENS.items():
-        ctx, page, _ = open_page(browser, base, route, lang="ko", width=360)
+        ctx, page, _ = open_page(browser, base, route, lang=lang, width=360)
         overflow = page.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
         ctx.close()
         assert overflow <= 1, (name, overflow)
@@ -302,7 +303,7 @@ def test_nat_labels_do_not_overlap(browser, base):
     hits = page.evaluate("""() => {
       const svg = document.querySelector('main svg[role=img]');
       const labels = [...svg.querySelectorAll('text')].filter(x => ['UDP', 'TCP'].includes(x.textContent));
-      const paths = [...svg.querySelectorAll('path')];
+      const paths = [...svg.querySelectorAll('path, line')];   // the other line, and the x axis
       const out = [];
       for (const lab of labels) {
         const b = lab.getBBox();
@@ -312,8 +313,8 @@ def test_nat_labels_do_not_overlap(browser, base):
             const pt = svg.createSVGPoint(); pt.x = x; pt.y = y;
             if (p.isPointInStroke(pt)) { out.push([lab.textContent, x, y]); x = Infinity; break; }
           }
-        for (const o of labels) if (o !== lab) { const c = o.getBBox();
-          if (b.x < c.x + c.width && c.x < b.x + b.width && b.y < c.y + c.height && c.y < b.y + b.height) out.push([lab.textContent, 'label']); }
+        for (const o of svg.querySelectorAll('text')) if (o !== lab) { const c = o.getBBox();   // tick labels too
+          if (b.x < c.x + c.width && c.x < b.x + b.width && b.y < c.y + c.height && c.y < b.y + b.height) out.push([lab.textContent, o.textContent]); }
       }
       return [labels.length, out];
     }""")

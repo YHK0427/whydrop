@@ -113,3 +113,13 @@ def test_export_without_to_ends_at_the_recording_not_the_export(tmp_path):
     assert m["recorded"][1] == dt.datetime.fromtimestamp(last / 1000).strftime("%Y-%m-%d")
     chart = json.loads((tmp_path / "site" / "data" / "chart_3600.json").read_text(encoding="utf-8"))
     assert chart["x_rel"] and max(chart["x_rel"]) > -120          # the last hour of the recording, not of the export
+
+
+def test_static_demo_has_the_korean_summary(tmp_path):
+    """The demo only exported the English summary, so the Korean page copied English text."""
+    st = build(tmp_path)
+    export_static(tmp_path / "w.db", tmp_path / "site", None, st["now_ms"], {"mode": "precision"})
+    ko = (tmp_path / "site" / "data" / "incidents_1_summary_ko.json").read_text(encoding="utf-8")
+    en = (tmp_path / "site" / "data" / "incidents_1_summary.json").read_text(encoding="utf-8")
+    assert "추정 원인: ISP 구간의 회선 끊김 (추정)" in ko and "Likely cause:" in en, ko
+

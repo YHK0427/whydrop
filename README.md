@@ -59,7 +59,7 @@ docker compose exec whydrop whydrop nat-test
 
 Measures how long the NAT and firewalls on your path keep an idle UDP mapping (10 s – 10 min) and an idle TCP connection (1 min – 1 h), all delays in parallel, and recommends a keepalive: for example *"timeout between 90 s and 120 s; keepalive 70 s or less"* (a real home router). Needs precision mode.
 
-Options: `--udp-only`, `--tcp-only`, `--max-delay N` (skip delays over N seconds), `--enable-7500` (also try 7500 s TCP, the RFC 5382 minimum; the reflector must be started with `--enable-7500` too). `[nat] enable_7500 = true` in `whydrop.toml` does the same for this command and for the dashboard's NAT test button.
+Options: `--udp-only`, `--tcp-only`, `--max-delay N` (skip delays over N seconds), `--enable-7500` (also try 7500 s TCP, just over the 2 h 4 min that RFC 5382 sets as the minimum; the reflector must be started with `--enable-7500` too). `[nat] enable_7500 = true` in `whydrop.toml` does the same for this command and for the dashboard's NAT test button.
 
 ## Configuration
 
@@ -84,7 +84,7 @@ The dashboard needs a token when it listens beyond localhost. `?public=1` switch
 
 ## Alerts and export
 
-- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h. Bodies use the public view.
+- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h. Bodies use the public view; `notify.lang = "ko"` sends them in the dashboard's Korean, and titles name the agent (`agent_name`).
 - Optional Uptime Kuma push heartbeat (`notify.kuma_push_url`).
 - Exports: drops, rough patches, events and minute aggregates as CSV or JSON; a per-drop bug report (public view, ±10 min); `whydrop replay` re-runs the analysis over a recorded database; `whydrop export-static` writes a read-only public demo of the dashboard.
 

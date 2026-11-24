@@ -119,3 +119,22 @@ def test_alert_title_names_the_agent():
     blob = json.loads(payload(ROW, "json", ROW["end_ms"], name="parents")[0])
     assert blob["title"] == "whydrop parents: Internet line dropped" and "parents" not in json.dumps(blob["drop"])
     assert payload(ROW, "ntfy", ROW["end_ms"])[1]["Title"] == "whydrop: Internet line dropped"   # no name: as before
+
+
+def test_korean_alert_uses_the_dashboard_wording():
+    """Alerts were English only; with `[notify] lang = "ko"` they use the dashboard's Korean words."""
+    import base64
+    body, headers = payload(ROW, "ntfy", ROW["end_ms"], lang="ko")
+    assert body == "인터넷 회선이 46초 동안 끊겼어요. ISP 구간의 회선 끊김 (추정). 내보내기로 증거를 저장하고 통신사에 문의하세요."
+    title = headers["Title"]
+    assert title.isascii() and title.startswith("=?UTF-8?B?")                      # a header must be Latin-1
+    assert base64.b64decode(title[10:-2]).decode() == "whydrop: 인터넷 회선이 끊김"
+    home = {**ROW, "primary_cause": "R7", "cause_final": "R7",
+            "evidence_json": json.dumps({"label": "In-home queueing (likely)", "cause": "R7", "cause_where": "home"})}
+    assert payload(home, "json", ROW["end_ms"], lang="ko")[0].count("집 안 네트워크가 46초 동안 느려졌어요.") == 1
+
+
+def test_alert_title_header_survives_a_name_with_a_newline():
+    _, headers = payload(ROW, "ntfy", ROW["end_ms"], name="a\r\nX-Evil: 1")
+    assert "\n" not in headers["Title"] and "\r" not in headers["Title"]
+

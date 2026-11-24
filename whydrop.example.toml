@@ -41,11 +41,12 @@ idle_interval_s = 600                    # 30–7500; how long the idle TCP conn
 pps = 10
 
 [nat]
-enable_7500 = false                      # also try the 7500 s TCP delay (RFC 5382 minimum) in nat-test and the dashboard button
+enable_7500 = false                      # also try 7500 s TCP (just over the RFC 5382 minimum of 2 h 4 min) in nat-test and the dashboard button
 
 [notify]
 # webhook_url = "https://ntfy.sh/your-topic"
 # format = "ntfy"                        # json | ntfy | discord
+# lang = "en"                            # en | ko: the alert text, in the dashboard's words
 # kuma_push_url = ""
 
 [storage]

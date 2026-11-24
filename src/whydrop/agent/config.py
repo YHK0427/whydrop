@@ -67,7 +67,7 @@ _TOP = {"agent_name", "reflector", "db_path", "gateway", "gateway_port", "router
         "targets", "intervals", "web", "canary", "udp_stream", "nat", "notify", "storage"}
 _NESTED = {"web": {"bind", "allowed_hosts", "public_view_default"}, "canary": {"idle_interval_s"},
            "intervals": set(DEFAULT_INTERVALS),
-           "udp_stream": {"pps"}, "nat": {"enable_7500"}, "notify": {"webhook_url", "format", "kuma_push_url"},
+           "udp_stream": {"pps"}, "nat": {"enable_7500"}, "notify": {"webhook_url", "format", "kuma_push_url", "lang"},
            "storage": {"min_free_mb"}}
 _ENV = {"WHYDROP_AGENT_NAME": "agent_name", "WHYDROP_REFLECTOR": "reflector", "WHYDROP_DB_PATH": "db_path"}
 
@@ -158,6 +158,8 @@ def _build(raw: dict, env: Mapping[str, str]) -> Config:
             flat[attr] = conv(raw[table][key])
     if raw.get("notify"):
         flat["notify"] = dict(raw["notify"])
+        if flat["notify"].get("lang", "en") not in ("en", "ko"):
+            raise ConfigError('notify.lang must be "en" or "ko"')
     for var, key in _ENV.items():
         if env.get(var):
             flat[key] = Path(env[var]) if key == "db_path" else env[var]

@@ -214,7 +214,7 @@ _PROTO = {   # the "In protocol terms" panel in both dashboard languages; the co
            "udp": "UDP: seq {a}–{b} 전송, reflector의 recv_count +{got} → {what}.",
            "stall": "HB에 응답이 없었어요", "retrans": "커널이 {n}번 재전송했어요(RTO {lo:g} → {hi:g}초)",
            "rst": "RST로 연결이 끊겼어요", "no_rst": "RST가 없어 연결은 살아 있었어요",
-           "ack": "{s}초 동안 조용하다가 첫 HB_ACK가 왔어요", "tcp": "TCP: {items}.", "sep": ". "},
+           "ack": "{s}초 동안 조용하다가 첫 HB_ACK이 왔어요", "tcp": "TCP: {items}.", "sep": ". "},
 }
 
 

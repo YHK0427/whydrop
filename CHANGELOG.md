@@ -16,6 +16,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - The packet strip and events were never deleted, and 1-minute aggregates grew forever. They are now kept 90 days (strip, events) and a year (minutes), as documented.
 - `whydrop replay --set STREAM_LOSS_S=…` had no effect (the 2 s was hard-coded); the unused `TIMEOUT_S` is gone, and three thresholds that lived outside `constants.py` (`LOSS_MIN_SENDS`, `WEAK_MIN_SAMPLES`, `ROAM_LOSS_WINDOW_S`) can now be set too.
 - `[intervals] link` was accepted and ignored (the link check runs every second by design); it is now rejected as an unknown key.
+- Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23

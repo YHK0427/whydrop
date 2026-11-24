@@ -127,7 +127,7 @@ h3 { font-size: 15px; font-weight: 600; }
 table.data { border-collapse: collapse; width: 100%; font-size: 13px; margin-top: var(--s2); }
 table.data th, table.data td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--rule); }
 table.data th { font-weight: 600; color: var(--ink-2); }
-table.data th { white-space: nowrap; }   /* one- or two-word headers: "길이" stacked as "길 / 이" on a phone */
+:lang(ko) table.data th { white-space: nowrap; }   /* short Korean headers: "길이" stacked as "길 / 이"; English ones may wrap */
 :lang(ko) { word-break: keep-all; overflow-wrap: break-word; }   /* Korean wraps between words, not inside them; long tokens still wrap */
 .tablewrap { max-height: 280px; overflow: auto; }
 

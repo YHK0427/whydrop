@@ -1,6 +1,7 @@
 """Public view (spec §8): one allowlist serializer for REST, WS, exports, evidence text and webhooks.
 Hidden: public IP, mapped ports, ISP DNS, reflector address, hostnames, interface names, CHAOS site code.
 Internal IPs keep only the last octet. Times become relative (seconds from now)."""
+import functools
 import ipaddress
 import json
 import re
@@ -30,6 +31,23 @@ INCIDENT_EVIDENCE = {"label", "cause", "next_step", "secondary", "protocol", "pr
 def shown_segments(segments, evidence: dict) -> list:
     """Where a drop is, as the verdict places it: in-home queueing timed the line out, but the delay is at home."""
     return ["home"] if evidence.get("cause_where") == "home" else list(segments)
+
+
+@functools.cache
+def _causes_ko() -> dict:
+    from importlib.resources import files
+    return json.loads((files("whydrop.web") / "static" / "i18n" / "causes.ko.json").read_text(encoding="utf-8"))
+
+
+def localized(text: str, lang: str) -> str:
+    """A cause label or next step in the dashboard's words for `lang` (the server stores English)."""
+    return _causes_ko().get(text, text) if lang == "ko" else text
+
+
+def subject_ko(word: str) -> str:
+    """word + 이/가, by whether its last syllable has a final consonant."""
+    last = word[-1:]
+    return word + ("이" if "가" <= last <= "힣" and (ord(last) - 0xAC00) % 28 else "가")
 
 
 def slowed(rule) -> bool:

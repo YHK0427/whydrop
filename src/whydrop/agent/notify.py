@@ -6,35 +6,49 @@ import json
 import logging
 import urllib.request
 
-from whydrop.web.public import public, shown_segments, slowed
+from whydrop.analysis import texts
+from whydrop.web.export import SEGMENT_WORDS
+from whydrop.web.public import localized, public, shown_segments, slowed, subject_ko
 
 log = logging.getLogger(__name__)
 
 KEEP_MS = 24 * 3600_000
 BACKOFF_S = (30, 60, 120, 300, 600, 1800)
 TIMEOUT_S = 10
-WORDS = {"home": "Home network", "line": "Internet line", "lan": "Router", "wifi": "Wi-Fi", "link": "Cable", "host_net": "This device",
-         "dns_router": "DNS", "dns_isp": "DNS", "dns_public": "DNS"}
 
 
-def text(row: dict, now_ms: int, name: str | None = None) -> tuple[str, str]:
-    """(title, sentence) in UI vocabulary: 'Internet line dropped for 46 s. Line drop … (likely).'"""
+def text(row: dict, now_ms: int, name: str | None = None, lang: str = "en") -> tuple[str, str]:
+    """(title, sentence) in the dashboard's words: 'Internet line dropped for 46 s. Line drop … (likely).'"""
     p = public(row, "incident", now_ms)
-    label = p["evidence"].get("label", "Likely cause unknown")
+    ev = p["evidence"]
+    label = localized(ev.get("label") or texts.CAUSES["unknown"][0], lang)   # a label the dashboard translates
     dur = (p["end_s"] or 0) - (p["start_s"] or 0)
-    segs, verb = shown_segments(p["segments"], p["evidence"]), "slowed down" if slowed(p["cause"]) else "dropped"
-    where = ", ".join(dict.fromkeys(WORDS.get(s, s) for s in segs)) or (p["point"] or "Connection").replace("_", " ")
+    segs, slow = shown_segments(p["segments"], ev), slowed(p["cause"])
+    where = ", ".join(dict.fromkeys(SEGMENT_WORDS[lang].get(s, s) for s in segs))
     head = f"whydrop {name}" if name else "whydrop"   # agent_name: which agent, when several alert one channel
-    title = f"{head}: {where} {verb}" if segs else f"{head}: {where}"
-    sentence = (f"{where} {verb} for {dur} s. {label}." if segs else f"{label}.")
-    step = p["evidence"].get("next_step")
-    return title, sentence + (f" {step}." if step else "")
+    if not segs:   # a point event: its label says it all
+        title = f"{head}: {label if lang == 'ko' else (p['point'] or 'Connection').replace('_', ' ')}"
+        sentence = f"{label}."
+    elif lang == "ko":
+        title = f"{head}: {subject_ko(where)} {'느려짐' if slow else '끊김'}"
+        sentence = f"{subject_ko(where)} {dur}초 동안 {'느려졌어요' if slow else '끊겼어요'}. {label}."
+    else:
+        verb = "slowed down" if slow else "dropped"
+        title, sentence = f"{head}: {where} {verb}", f"{where} {verb} for {dur} s. {label}."
+    step = ev.get("next_step")
+    return " ".join(title.split()), sentence + (f" {localized(step, lang)}." if step else "")   # no CR/LF in a header
 
 
-def payload(row: dict, fmt: str, now_ms: int, name: str | None = None) -> tuple[str, dict]:
-    title, sentence = text(row, now_ms, name)
+def _header(v: str) -> str:
+    """HTTP headers are Latin-1: anything else goes as an RFC 2047 encoded word, which ntfy decodes."""
+    import base64
+    return v if v.isascii() else "=?UTF-8?B?" + base64.b64encode(v.encode()).decode() + "?="
+
+
+def payload(row: dict, fmt: str, now_ms: int, name: str | None = None, lang: str = "en") -> tuple[str, dict]:
+    title, sentence = text(row, now_ms, name, lang)
     if fmt == "ntfy":
-        return sentence, {"Title": title, "Tags": "warning", "Content-Type": "text/plain; charset=utf-8"}
+        return sentence, {"Title": _header(title), "Tags": "warning", "Content-Type": "text/plain; charset=utf-8"}
     if fmt == "discord":
         return json.dumps({"content": f"**{title}**\n{sentence}"}), {"Content-Type": "application/json"}
     return json.dumps({"type": "whydrop.drop", "title": title, "text": sentence, "drop": public(row, "incident", now_ms)},
@@ -51,7 +65,7 @@ def _post(url: str, body: str, headers: dict) -> None:
 
 class Notifier:
     def __init__(self, cfg_notify, now_ms, on_queue=None, name: str | None = None):
-        self.name = name
+        self.name, self.lang = name, (cfg_notify or {}).get("lang", "en")
         self.on_queue = on_queue or (lambda q: None)   # persist after every change
         self.url = (cfg_notify or {}).get("webhook_url")
         self.fmt = (cfg_notify or {}).get("format", "json")
@@ -64,7 +78,7 @@ class Notifier:
         return bool(self.url)
 
     async def _send(self, row: dict) -> bool:
-        body, headers = payload(row, self.fmt, self.now_ms(), self.name)
+        body, headers = payload(row, self.fmt, self.now_ms(), self.name, self.lang)
         try:
             await asyncio.to_thread(_post, self.url, body, headers)
             return True
