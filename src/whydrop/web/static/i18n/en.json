@@ -194,7 +194,7 @@
   "why.rst": "ended by an RST",
   "why.norst": "no RST",
   "why.na": "–",
-  "fact.dur": "Lasted {dur} s; down: {segs}",
+  "fact.dur": "Lasted {dur} s; probes timed out on: {segs}",
   "fact.gw": "Router check: {ok} of {sent} answered, usually {base} ms, up to {peak} ms",
   "fact.line": "Beyond the router: {sent} probes, {ok} on time, {late} late, {lost} lost",
   "fact.stream": "UDP stream: {up} lost on the way up, {down} on the way down",
