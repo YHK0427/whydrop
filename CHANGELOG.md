@@ -44,7 +44,7 @@ First release.
 ### Added
 
 **Agent (basic mode)**
-- Probes every second over TCP and UDP: router check (TCP RST from a closed port; ICMP echo on Windows), line heartbeat (STUN, rotating providers), DNS over UDP and TCP to the router, the ISP's resolvers and public resolvers, STUN mapped address, TCP connect to port 443.
+- Probes every second over TCP and UDP: router check (TCP RST from a closed port; ICMP echo on Windows), line heartbeat (a STUN or DNS question, rotating providers), DNS over UDP and TCP to the router, the ISP's resolvers and public resolvers, STUN mapped address, TCP connect to port 443.
 - Wi-Fi and link state from `iw`, `netsh` (English and Korean) and `/sys`: re-associations, roams, signal, carrier.
 - Environment detection and a self-check; watches for network changes every 5 s; refuses to run in a VM-backed Docker.
 - SQLite storage with 1-second and 1-minute aggregates, retention and a disk guard. About 19 MiB of memory, under 8 kbit/s.

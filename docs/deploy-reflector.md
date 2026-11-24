@@ -72,7 +72,7 @@ Then `docker compose up -d`. On the dashboard's Now page the TCP lane starts sho
 
 ## Is it safe to run?
 
-- Without the secret, the reflector answers nothing: every UDP packet must carry a valid HMAC, and every TCP connection must answer a nonce challenge first.
+- Without the secret you get nothing useful: UDP packets without a valid HMAC get no answer, and a TCP connection gets only a 20-byte nonce challenge, then is closed unless the HELLO proves the secret.
 - It cannot be used to amplify traffic: a reply is never larger than the request, and a NAT test request gets at most two replies.
 - Junk is dropped before any hashing (wrong size, magic or type), and each source IP is rate limited before and after the HMAC check.
 - Every sequence number is answered once; replayed packets get nothing.
