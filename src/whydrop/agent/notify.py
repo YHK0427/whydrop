@@ -15,9 +15,11 @@ log = logging.getLogger(__name__)
 KEEP_MS = 24 * 3600_000
 BACKOFF_S = (30, 60, 120, 300, 600, 1800)
 TIMEOUT_S = 10
+MAX_QUEUE = 100                     # undelivered alerts kept for retry; the oldest go first
+MAX_PER_HOUR = 12                   # a flapping line must not become a notification every minute
 
 
-def text(row: dict, now_ms: int, name: str | None = None, lang: str = "en") -> tuple[str, str]:
+def text(row: dict, now_ms: int, name: str | None = None, lang: str = "en", held: int = 0) -> tuple[str, str]:
     """(title, sentence) in the dashboard's words: 'Internet line dropped for 46 s. Line drop … (likely).'"""
     p = public(row, "incident", now_ms)
     ev = p["evidence"]
@@ -36,7 +38,11 @@ def text(row: dict, now_ms: int, name: str | None = None, lang: str = "en") -> t
         verb = "slowed down" if slow else "dropped"
         title, sentence = f"{head}: {where} {verb}", f"{where} {verb} for {dur} s. {label}."
     step = ev.get("next_step")
-    return " ".join(title.split()), sentence + (f" {localized(step, lang)}." if step else "")   # no CR/LF in a header
+    sentence += f" {localized(step, lang)}." if step else ""
+    if held:   # drops the hourly cap held back
+        sentence += (f" (알리지 않은 끊김 {held}개 더: 대시보드를 보세요)" if lang == "ko"
+                     else f" (+{held} more drops not alerted; see the dashboard)")
+    return " ".join(title.split()), sentence   # no CR/LF in a header   # no CR/LF in a header
 
 
 def _header(v: str) -> str:
@@ -45,8 +51,9 @@ def _header(v: str) -> str:
     return v if v.isascii() else "=?UTF-8?B?" + base64.b64encode(v.encode()).decode() + "?="
 
 
-def payload(row: dict, fmt: str, now_ms: int, name: str | None = None, lang: str = "en") -> tuple[str, dict]:
-    title, sentence = text(row, now_ms, name, lang)
+def payload(row: dict, fmt: str, now_ms: int, name: str | None = None, lang: str = "en",
+            held: int = 0) -> tuple[str, dict]:
+    title, sentence = text(row, now_ms, name, lang, held)
     if fmt == "ntfy":
         return sentence, {"Title": _header(title), "Tags": "warning", "Content-Type": "text/plain; charset=utf-8"}
     if fmt == "discord":
@@ -72,15 +79,18 @@ class Notifier:
         self.kuma = (cfg_notify or {}).get("kuma_push_url")
         self.now_ms = now_ms
         self.queue: list[dict] = []          # {"row", "first_ms", "next_ms", "tries"}
+        self._recent: list[int] = []         # when the last alerts went out (the hourly cap)
+        self.held = 0                        # drops not alerted because of the cap, told with the next one
 
     @property
     def enabled(self) -> bool:
         return bool(self.url)
 
     async def _send(self, row: dict) -> bool:
-        body, headers = payload(row, self.fmt, self.now_ms(), self.name, self.lang)
+        body, headers = payload(row, self.fmt, self.now_ms(), self.name, self.lang, self.held)
         try:
             await asyncio.to_thread(_post, self.url, body, headers)
+            self.held = 0
             return True
         except Exception as e:   # OSError, http.client errors, …: log the type only (the URL may hold a token)
             log.warning("alert not delivered (%s); will retry", type(e).__name__)
@@ -90,24 +100,35 @@ class Notifier:
         data = msg.get("data") or {}
         if not self.enabled or msg.get("type") != "incident" or data.get("op") != "finalized":
             return
+        now = self.now_ms()
+        self._recent = [t for t in self._recent if now - t < 3600_000]
+        if len(self._recent) >= MAX_PER_HOUR:
+            self.held += 1
+            log.info("alert held: %d alerts in the last hour", len(self._recent))
+            return
+        self._recent.append(now)
         if not await self._send(data["row"]):
-            self.queue.append({"row": data["row"], "first_ms": self.now_ms(), "next_ms": self.now_ms() + BACKOFF_S[0] * 1000,
-                               "tries": 1})
+            self.queue.append({"row": data["row"], "first_ms": now, "next_ms": now + BACKOFF_S[0] * 1000, "tries": 1})
+            if len(self.queue) > MAX_QUEUE:
+                log.warning("alert queue full: dropping the oldest undelivered alert")
+                del self.queue[0]
             self.on_queue(self.queue)
 
     async def retry(self) -> None:
-        now, keep = self.now_ms(), []
+        now, keep, changed = self.now_ms(), [], False
         for item in self.queue:
             if now - item["first_ms"] > KEEP_MS:
                 log.warning("alert dropped after 24 h of failed deliveries")
                 continue
             if item["next_ms"] > now:
                 keep.append(item)
-            elif not await self._send(item["row"]):
-                item["tries"] += 1
-                item["next_ms"] = now + BACKOFF_S[min(item["tries"] - 1, len(BACKOFF_S) - 1)] * 1000
-                keep.append(item)
-        changed = len(keep) != len(self.queue)
+            else:
+                changed = True   # sent, or failed again with a new backoff: either way the saved queue is stale
+                if not await self._send(item["row"]):
+                    item["tries"] += 1
+                    item["next_ms"] = now + BACKOFF_S[min(item["tries"] - 1, len(BACKOFF_S) - 1)] * 1000
+                    keep.append(item)
+        changed = changed or len(keep) != len(self.queue)
         self.queue = keep
         if changed:
             self.on_queue(self.queue)
