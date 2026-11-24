@@ -59,6 +59,8 @@ docker compose exec whydrop whydrop nat-test
 
 경로에 있는 NAT와 방화벽이 쉬고 있는 UDP 매핑(10초~10분)과 TCP 연결(1분~1시간)을 얼마나 기억하는지 모든 대기 시간을 동시에 재고, keepalive를 권해 줘요. 예를 들면 *"timeout between 90 s and 120 s; keepalive 70 s or less"*(실제 집 공유기의 결과)처럼요. 정밀 모드가 필요해요.
 
+옵션: `--udp-only`, `--tcp-only`, `--max-delay N`(N초보다 긴 대기는 건너뜀), `--enable-7500`(RFC 5382의 최소값인 7500초 TCP도 시험. reflector도 `--enable-7500`으로 켜야 해요). `whydrop.toml`의 `[nat] enable_7500 = true`는 이 명령과 대시보드의 NAT 테스트 버튼 모두에 같은 효과를 내요.
+
 ## 설정
 
 모두 선택 사항이에요. 설정은 `WHYDROP_*` 환경 변수(`compose.yaml` 옆의 `.env`), 그다음 `whydrop.toml`, 그다음 기본값 순서로 정해져요. 모든 키는 [`whydrop.example.toml`](whydrop.example.toml)에, 환경 변수는 [`.env.example`](.env.example)에 있어요. 알림과 대부분의 조정은 `whydrop.toml`에만 있어요. Docker라면 `compose.yaml` 옆에 두고 `volumes:` 아래에 `- ./whydrop.toml:/app/whydrop.toml:ro`를 더하세요.

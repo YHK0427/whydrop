@@ -59,6 +59,8 @@ docker compose exec whydrop whydrop nat-test
 
 Measures how long the NAT and firewalls on your path keep an idle UDP mapping (10 s – 10 min) and an idle TCP connection (1 min – 1 h), all delays in parallel, and recommends a keepalive: for example *"timeout between 90 s and 120 s; keepalive 70 s or less"* (a real home router). Needs precision mode.
 
+Options: `--udp-only`, `--tcp-only`, `--max-delay N` (skip delays over N seconds), `--enable-7500` (also try 7500 s TCP, the RFC 5382 minimum; the reflector must be started with `--enable-7500` too). `[nat] enable_7500 = true` in `whydrop.toml` does the same for this command and for the dashboard's NAT test button.
+
 ## Configuration
 
 Everything is optional. Settings come from `WHYDROP_*` environment variables (in `.env` next to `compose.yaml`), then `whydrop.toml`, then defaults. [`whydrop.example.toml`](https://github.com/YHK0427/whydrop/blob/main/whydrop.example.toml) documents every key; [`.env.example`](https://github.com/YHK0427/whydrop/blob/main/.env.example) the environment. Alerts and most tuning live only in `whydrop.toml`: with Docker, put it next to `compose.yaml` and add `- ./whydrop.toml:/app/whydrop.toml:ro` under `volumes:`.

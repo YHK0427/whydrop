@@ -84,8 +84,9 @@ def _nat_test(args: argparse.Namespace) -> int:
         print("whydrop: nat-test needs a reflector (WHYDROP_REFLECTOR or reflector = in the config)", file=sys.stderr)
         return 2
     udp = () if args.tcp_only else natprobe.UDP_DELAYS
-    tcp_all = natprobe.TCP_DELAYS + ((7500,) if args.enable_7500 else ())
-    max_delay = args.max_delay if args.max_delay is not None else (7500 if args.enable_7500 else 3600)
+    long = args.enable_7500 or cfg.nat_enable_7500   # the flag, or `[nat] enable_7500` in the config
+    tcp_all = natprobe.TCP_DELAYS + ((7500,) if long else ())
+    max_delay = args.max_delay if args.max_delay is not None else (7500 if long else 3600)
     udp = tuple(d for d in udp if d <= max_delay)
     tcp = () if args.udp_only else tuple(d for d in tcp_all if d <= max_delay)
     longest = max(udp + tcp, default=0)

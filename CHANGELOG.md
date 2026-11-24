@@ -11,6 +11,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - The public demo's protocol page said packets appear once precision mode is on, with a pause button and an empty table. It now says the demo has no packets and links the protocol document.
 - NAT chart: the UDP label could sit on the TCP line.
 - Korean text wrapped inside words (for example "(추 / 정)"), and table headers stacked on a phone.
+- `[nat] enable_7500 = true` was read but ignored: `whydrop nat-test` and the dashboard's NAT test now include the 7500 s TCP delay when it is set.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23

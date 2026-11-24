@@ -47,7 +47,7 @@ WHYDROP_SECRET='여기에-비밀값' whydrop reflector --state-dir /var/lib/whyd
 
 `--state-dir`에는 재생 방지 기록(세션마다 본 가장 큰 순번)이 저장돼요. 이 덕분에 가로챈 패킷은 재시작 뒤에도 쓸모가 없어요. 사라지지 않는 저장소에 두세요.
 
-옵션: `--port`(기본 48100), `--host`(기본 0.0.0.0), `--enable-7500`(`nat-test`의 7500초 TCP 대기를 허용. 연결 하나를 두 시간 동안 열어 두기 때문에 기본은 꺼져 있어요).
+옵션: `--port`(기본 48100), `--host`(기본 0.0.0.0), `--enable-7500`(`nat-test`의 7500초 TCP 대기를 허용. 연결 하나를 두 시간 동안 열어 두기 때문에 기본은 꺼져 있어요). 에이전트는 `whydrop nat-test --enable-7500`이나 에이전트 쪽 `whydrop.toml`의 `[nat] enable_7500 = true`일 때만 이 대기를 요청해요.
 
 ## 3. 포트 열기
 

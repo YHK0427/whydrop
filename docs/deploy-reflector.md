@@ -47,7 +47,7 @@ WHYDROP_SECRET='paste-your-secret-here' whydrop reflector --state-dir /var/lib/w
 
 `--state-dir` holds the replay tombstones (the highest sequence number seen per session), which make captured packets worthless even after a restart. Keep it on persistent storage.
 
-Options: `--port` (default 48100), `--host` (default 0.0.0.0), `--enable-7500` (allow the 7500 s TCP delay in `nat-test`; off by default because it keeps a connection open for two hours).
+Options: `--port` (default 48100), `--host` (default 0.0.0.0), `--enable-7500` (allow the 7500 s TCP delay in `nat-test`; off by default because it keeps a connection open for two hours). The agent asks for that delay only with `whydrop nat-test --enable-7500` or `[nat] enable_7500 = true` in its `whydrop.toml`.
 
 ## 3. Open the port
 

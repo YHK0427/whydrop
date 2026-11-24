@@ -95,3 +95,20 @@ def test_replay_in_chunks_matches_one_pass(tmp_path, monkeypatch):
     whole = rp.summary(rp.replay(tmp_path / "w.db"))
     monkeypatch.setattr(rp, "CHUNK_MS", 40_000)
     assert rp.summary(rp.replay(tmp_path / "w.db")) == whole and len(whole) == 1
+
+
+def test_nat_test_follows_enable_7500_in_the_config(monkeypatch, tmp_path):
+    """`[nat] enable_7500 = true` was read and then ignored by `whydrop nat-test`."""
+    from whydrop.agent.precision import natprobe
+    seen = {}
+
+    async def fake(addr, secret, *, udp_delays, tcp_delays, on_progress):
+        seen["tcp"] = tcp_delays
+        return natprobe.NatReport([], [], (None, None), (None, None), {"udp": None, "tcp": None})
+    monkeypatch.setattr(natprobe, "nat_test", fake)
+    monkeypatch.setenv("WHYDROP_SECRET", "s" * 40)
+    monkeypatch.setenv("WHYDROP_REFLECTOR", "192.0.2.9")
+    monkeypatch.setenv("WHYDROP_DB_PATH", str(tmp_path / "none.db"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "whydrop.toml").write_text("[nat]\nenable_7500 = true\n")
+    assert main(["nat-test", "--tcp-only"]) == 0 and seen["tcp"][-1] == 7500

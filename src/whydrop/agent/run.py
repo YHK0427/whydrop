@@ -576,13 +576,14 @@ class Agent:
     async def _run_nat(self) -> None:
         from whydrop.agent.precision import natprobe
         secret, start = load_secret(os.environ, required=True), self.now()
-        self._nat_progress = {"done": 0, "total": len(natprobe.UDP_DELAYS) + len(natprobe.TCP_DELAYS), "last": None}
+        tcp = natprobe.TCP_DELAYS + ((7500,) if self.cfg.nat_enable_7500 else ())   # the reflector must allow it too
+        self._nat_progress = {"done": 0, "total": len(natprobe.UDP_DELAYS) + len(tcp), "last": None}
 
         def progress(r):
             self._nat_progress["done"] += 1
             self._nat_progress["last"] = {"proto": r.proto, "delay_s": r.delay_s, "alive": r.alive}
         try:
-            rep = await natprobe.nat_test(reflector_addr(self.cfg), secret, on_progress=progress)
+            rep = await natprobe.nat_test(reflector_addr(self.cfg), secret, tcp_delays=tcp, on_progress=progress)
             await natprobe.store_report(self.store, rep, start_ms=start, end_ms=self.now())
             self._nat_tcp_lower = rep.tcp_range[0]
             if self.engine is not None:

@@ -41,7 +41,7 @@ idle_interval_s = 600                    # 30–7500; how long the idle TCP conn
 pps = 10
 
 [nat]
-enable_7500 = false                      # allow the 7500 s TCP nat-test delay (RFC 5382 minimum)
+enable_7500 = false                      # also try the 7500 s TCP delay (RFC 5382 minimum) in nat-test and the dashboard button
 
 [notify]
 # webhook_url = "https://ntfy.sh/your-topic"
