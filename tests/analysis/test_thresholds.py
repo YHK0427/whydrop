@@ -139,6 +139,15 @@ def test_gate_short(secs, burst):
     assert seg_states(s, "line") == ([(80, "burst")] if burst else [(80, "down"), (80 + secs, "up")])
 
 
+def test_gate_ignores_the_loss_of_an_earlier_router_outage():
+    """The router outage's own failed heartbeats are not a lossy period: a 5 s line drop after it is a drop, and it
+    joins the router's incident as a restart."""
+    s = router_drop(Scenario.default(300), 30, 40).internet_down(55, 60)
+    assert seg_states(s, "line") == [(55, "down"), (60, "up")]
+    [f] = finals(s)
+    assert f.incident.segments == {"lan", "line"} and texts.ROUTER_RESTART in f.incident.chain
+
+
 @pytest.mark.parametrize("attempts, down", [(2, False), (3, True), (4, True)])   # window = 3 × 5 s: 3 attempts
 def test_dns_window(attempts, down):
     s = Scenario.default(120).fail(30, 30 + 5 * attempts - 4, pairs={ROUTER})
