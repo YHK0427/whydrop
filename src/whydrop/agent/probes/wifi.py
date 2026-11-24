@@ -66,13 +66,13 @@ def parse_proc_wireless(text: str, iface: str) -> float | None:
 
 
 def parse_iw_link(text: str) -> dict:
-    m = re.search(r"Connected to ([0-9a-f:]{17})", text)
+    m = re.search(r"^Connected to ([0-9a-f:]{17})", text, re.M)
     if not m:
         return {}
     out: dict = {"bssid": m.group(1)}
-    if f := re.search(r"freq:\s*(\d+)", text):
+    if f := re.search(r"^\s*freq:\s*(\d+)", text, re.M):  # anchored: the SSID line can contain any text
         out["freq"] = int(f.group(1))
-    if s := re.search(r"signal:\s*(-?\d+)", text):
+    if s := re.search(r"^\s*signal:\s*(-?\d+)", text, re.M):
         out["signal"] = float(s.group(1))
     return out
 

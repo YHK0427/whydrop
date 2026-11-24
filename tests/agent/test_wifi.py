@@ -214,3 +214,57 @@ def test_one_empty_iw_answer_is_not_a_reassoc(monkeypatch, tmp_path):
     p._last_iw = -1e9
     second = asyncio.run(p.snapshot())  # iw link came back empty once
     assert t.update(first) == [] and t.update(second) == [] and second.bssid == first.bssid
+
+def test_iw_values_come_from_their_own_lines():
+    tricky = IW_LINK.replace("example-ssid", "net freq: 2412 signal: -10 dBm")  # an SSID can hold any text
+    assert wifi.parse_iw_link(tricky) == {"bssid": "02:00:00:00:00:03", "freq": 5180, "signal": -41.0}
+
+
+SSID = "zq-made-up-ssid-41"
+
+
+def test_ssid_never_stored_by_any_path(monkeypatch, tmp_path, caplog):
+    import json
+    import logging
+
+    from whydrop.agent import run as runmod
+    from whydrop.agent.config import load_config
+    caplog.set_level(logging.DEBUG)
+    netsh = [t.replace("example-ssid", SSID) for t in (NETSH_EN, NETSH_KO, NETSH_JA)]
+    netsh.append(netsh[0].replace("02:00:00:00:00:01", "02:00:00:00:00:09"))  # a roam
+    iw_link = IW_LINK.replace("example-ssid", SSID)
+    returned = [wifi.parse_netsh(t) for t in netsh] + [wifi.parse_iw_link(iw_link), wifi.parse_iw_station(IW_STATION)]
+    assert SSID not in repr(returned)
+    queue = iter(netsh)
+
+    async def fake_run(*args, **k):
+        if args[0] == "netsh":
+            return next(queue)
+        return iw_link if args[-1] == "link" else IW_STATION
+    monkeypatch.setattr(wifi, "_run", fake_run)
+    (tmp_path / "sys" / "wlan0").mkdir(parents=True)
+    (tmp_path / "sys" / "wlan0" / "operstate").write_text("up\n")
+
+    async def main():
+        cfg = load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "db" / "w.db")})
+        a = runmod.Agent(cfg, asyncio.Event())
+        await a.store.open()
+        a.agg = runmod.Aggregator(a.store, a.now)
+        a.findings = runmod.FindingsTracker(a.targets, a.now)
+        a.wifi_tracker = WifiTracker(b"salt", a.now)
+        snaps = [await wifi.WindowsWifi().snapshot() for _ in netsh]
+        snaps.append(await wifi.LinuxWifi("wlan0", sys_root=tmp_path / "sys", proc_wireless=tmp_path / "x").snapshot())
+        assert all(s.up for s in snaps) and SSID not in repr(snaps)
+        for s in snaps:
+            await a.record([wifi.to_result(s, a.wifi_tracker, a.now()), *a.wifi_tracker.update(s)])
+        await a.agg.flush_ready(force=True)
+        await a.store.meta_set("ap_labels", json.dumps(a.wifi_tracker.labels))
+        await a.store.flush()
+        kinds = [r[0] for r in await a.store.execute("select kind from events")]
+        await a.store.close()
+        return kinds
+    assert "roam" in asyncio.run(main())  # events were written, so the grep below sees real rows
+    for f in (tmp_path / "db").iterdir():
+        data = f.read_bytes()
+        assert SSID.encode() not in data and SSID.encode("utf-16-le") not in data, f.name
+    assert SSID not in caplog.text

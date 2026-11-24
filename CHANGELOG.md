@@ -20,6 +20,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
 - On Windows in a language other than English or Korean (for example Japanese), `netsh` was always read as "Wi-Fi disconnected", so Wi-Fi was never watched. The listed BSSID now decides whether Wi-Fi is associated.
+- On Linux, a network name (SSID) containing text such as `freq: 2412` or `signal: -10` replaced the frequency and signal read from `iw`. Each value is now read from its own line only.
 
 ## [0.1.0] - 2026-11-23
 
