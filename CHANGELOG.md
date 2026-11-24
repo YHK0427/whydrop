@@ -14,6 +14,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `[nat] enable_7500 = true` was read but ignored: `whydrop nat-test` and the dashboard's NAT test now include the 7500 s TCP delay when it is set.
 - Alert titles now name the agent (`agent_name`, `WHYDROP_AGENT_NAME`), as the example config said they did. Compose passes `WHYDROP_AGENT_NAME` through.
 - The packet strip and events were never deleted, and 1-minute aggregates grew forever. They are now kept 90 days (strip, events) and a year (minutes), as documented.
+- `whydrop replay --set STREAM_LOSS_S=…` had no effect (the 2 s was hard-coded); the unused `TIMEOUT_S` is gone, and three thresholds that lived outside `constants.py` (`LOSS_MIN_SENDS`, `WEAK_MIN_SAMPLES`, `ROAM_LOSS_WINDOW_S`) can now be set too.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23

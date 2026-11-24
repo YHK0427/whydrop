@@ -108,3 +108,14 @@ def test_random_iid_loss_no_false_line_downs():
         _, ch = run(s)
         downs = [c for c in ch if c.segment == "line" and c.state == "down"]
         assert len(downs) <= allowed, (frac, len(downs))
+
+
+def test_stream_loss_needs_stream_loss_s_in_a_row(monkeypatch):
+    """The 2 s was hard-coded next to the constant meant to set it."""
+    from whydrop.analysis import constants as K
+    monkeypatch.setattr(K, "STREAM_LOSS_S", 6)
+    _, ch = run(Scenario.default(90, mode="precision").internet_down(30, 34))   # 4 s of stream loss: not enough now
+    assert of(ch, "line") == []
+    _, ch = run(Scenario.default(90, mode="precision").internet_down(30, 40))
+    assert of(ch, "line") == [(30, "down"), (40, "up")]                       # and the run's start is backdated
+

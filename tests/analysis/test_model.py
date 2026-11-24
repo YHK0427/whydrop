@@ -83,7 +83,7 @@ def test_override_constant():
         K.override("SETTLE_S", "40")
         assert K.SETTLE_S == 40 and isinstance(K.SETTLE_S, int)
         with pytest.raises(KeyError):
-            K.override("TIMEOUT_S", "1")
+            K.override("override", "1")   # exists, but not a number
     finally:
         K.SETTLE_S = old
 
@@ -103,3 +103,12 @@ def test_late_reply_for_unbuilt_frame():
     fb.add_late(T0, "line_hb", "p")
     [f] = fb.ready(T0 + 5000)
     assert (f.samples[("line_hb", "p")].lost, f.samples[("line_hb", "p")].late) == (0, 1)
+
+
+def test_every_analysis_constant_is_used():
+    """`replay --set` promises every constant changes the analysis: TIMEOUT_S and STREAM_LOSS_S were read by nothing."""
+    import re
+    from pathlib import Path
+    src = "\n".join(p.read_text(encoding="utf-8") for p in Path(K.__file__).parent.glob("*.py") if p.name != "constants.py")
+    names = [n for n, v in vars(K).items() if n.isupper() and isinstance(v, (int, float))]
+    assert names and [n for n in names if not re.search(rf"\bK\.{n}\b", src)] == []

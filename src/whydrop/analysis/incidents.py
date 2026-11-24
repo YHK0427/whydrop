@@ -144,7 +144,7 @@ class Incidents:
             elif e.kind == "rst" and e.detail.get("canary", "hot") == "hot":
                 self._pending.append((e.ts_ms + K.NAT_RESET_WINDOW_S * 1000, "rst", e))
             elif e.kind == "roam":
-                self._pending.append((e.ts_ms + 5000, "roam", e))
+                self._pending.append((e.ts_ms + K.ROAM_LOSS_WINDOW_S * 1000, "roam", e))
         out += self._decide(t)
         return out
 
@@ -198,7 +198,7 @@ class Incidents:
             elif kind == "roam":
                 busy = self.current is not None or (self.last is not None and self.last.end_ms is not None
                                                     and e.ts_ms - self.last.end_ms <= K.MERGE_AFTER_END_S * 1000)
-                if not busy and self._lost_between(e.ts_ms - 5000, e.ts_ms + 5000, ("gateway", "line_hb", "stun", "tcp_connect",
+                if not busy and self._lost_between(e.ts_ms - K.ROAM_LOSS_WINDOW_S * 1000, e.ts_ms + K.ROAM_LOSS_WINDOW_S * 1000, ("gateway", "line_hb", "stun", "tcp_connect",
                                                                       "udp_stream", "canary", "dns")):
                     self._point("roam_loss", e.ts_ms, out)
         self._pending = keep
