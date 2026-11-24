@@ -93,7 +93,8 @@ def rewrite(db: Path, backup: Path) -> list[dict]:
         with sqlite3.connect(backup) as b:
             con.backup(b)
         b.close()
-        first = con.execute("SELECT MIN(ts_ms) FROM samples_1s").fetchone()[0]
+        lo, hi = con.execute("SELECT MIN(ts_ms), MAX(ts_ms) FROM samples_1s").fetchone()
+        first = None if lo is None else max(lo, hi - 8 * 86_400_000)   # what replay() reads: older drops can't be judged
         out = []
         for rid, start, end, tags, ev in con.execute(
                 "SELECT id, start_ms, end_ms, tags_json, evidence_json FROM incidents WHERE end_ms IS NOT NULL "

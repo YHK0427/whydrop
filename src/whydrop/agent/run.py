@@ -630,8 +630,10 @@ class Agent:
             log.error("dashboard off: can't listen on %s:%s (%s); recording continues", host, port,
                       getattr(e, "strerror", None) or e)
             return
+        from uvicorn.config import WS_PROTOCOLS
+        ws = "websockets-sansio" if "websockets-sansio" in WS_PROTOCOLS else "auto"   # older uvicorn (the floor is 0.32) lacks it
         server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off",
-                                               ws="websockets-sansio", timeout_graceful_shutdown=3))
+                                               ws=ws, timeout_graceful_shutdown=3))
         server.capture_signals = contextlib.nullcontext   # the agent owns SIGINT/SIGTERM
         self._web = server
 

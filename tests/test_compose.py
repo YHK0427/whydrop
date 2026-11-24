@@ -36,3 +36,20 @@ def test_dockerfile_runs_as_10001_and_pins_base():
     d = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert re.search(r"^FROM python:3\.12-slim@sha256:[0-9a-f]{64}", d, re.M)
     assert re.search(r"^USER 10001$", d, re.M) and "iw=" in d
+
+
+def test_settings_in_whydrop_toml_win_over_compose_defaults(tmp_path):
+    """Final review: compose passed WHYDROP_AGENT_NAME=home and WHYDROP_WEB_BIND=0.0.0.0:8790 whenever .env was silent,
+    and the environment beats the file, so agent_name and [web] bind in a mounted whydrop.toml were ignored."""
+    import re as _re
+    from whydrop.agent.config import load_config
+    env = {}
+    for k, default in _re.findall(r"(WHYDROP_[A-Z_]+): \$\{WHYDROP_[A-Z_]+:-([^}]*)\}", BODY):
+        env[k] = default                                     # what compose hands the agent with an empty .env
+    env.update({k: v for k, v in _re.findall(r"^\s+(WHYDROP_[A-Z_]+): ([^$\s#][^\s#]*)", BODY, _re.M)})
+    p = tmp_path / "whydrop.toml"
+    p.write_text('agent_name = "office"\n[web]\nbind = "127.0.0.1:8790"\n')
+    c = load_config(p, env)
+    assert (c.agent_name, c.web.bind) == ("office", "127.0.0.1:8790")
+    c = load_config(None, env)
+    assert (c.agent_name, c.web.bind) == ("home", "0.0.0.0:8790")   # no file: the compose quick start stays LAN-reachable

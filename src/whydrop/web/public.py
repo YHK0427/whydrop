@@ -147,7 +147,7 @@ def public(row: dict, kind: str, now_ms: int) -> dict:
     if kind == "selfcheck":
         res = _j(r.get("result_json"))
         return {"t_s": _rel(r.get("ts_ms"), now_ms), "excluded": len(res.get("excluded", {})),
-                "verdict": res.get("verdict")}
+                "dns_interception": res.get("dns_interception")}   # the report card's one verdict (it never had a "verdict")
     if kind == "nat":
         return {k: r[k] for k in ("proto", "delay_s", "alive") if k in r}
     if kind == "strip":

@@ -4,6 +4,14 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Fixed
+- Under Compose, `agent_name` and `[web] bind` in `whydrop.toml` were ignored (Compose always passed its own defaults). Compose now passes a lower-priority default (`WHYDROP_DEFAULT_WEB_BIND`), so the file wins and `.env` still wins over both.
+- A drop that ended less than 80 s before an agent restart, or was open across it, never alerted; it is now finalized (and alerted) at the restart.
+- Findings a crashed run left open (e.g. secret mismatch) stayed on the dashboard forever; they are closed at the next start and raised again if they still hold.
+- After a backward clock step, timestamps stayed ahead of the wall clock until a restart, so the dashboard missed the newest data. They now run at half speed until they meet it, never going back.
+- `replay --write` called drops 8-90 days old "not a drop now"; they are "no 1 s data", as replay only reads the last 8 days.
+- The public self-check view always had an empty `verdict`; it now carries the report card's DNS-interception verdict. The dashboard falls back to uvicorn's default WebSocket implementation on versions older than the one it prefers.
+
 ## [0.2.0] - 2026-11-24
 
 ### Added
