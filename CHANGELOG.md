@@ -4,6 +4,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-24
+
 ### Added
 - `whydrop replay --write`: after an upgrade, store the current analysis's verdict on past drops (backup first; point events and drops without 1-second data are left alone).
 

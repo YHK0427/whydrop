@@ -111,7 +111,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 
 **Does precision mode need a paid VPS?** No. The reflector needs a public IP and one open port (UDP and TCP 48100); a free-tier VM is enough.
 
-**IPv6?** v0.1 measures IPv4. Dual-stack networks work; the IPv6 path isn't judged separately yet.
+**IPv6?** whydrop measures IPv4. Dual-stack networks work; the IPv6 path isn't judged separately yet.
 
 **Docker Desktop, WSL or a VM?** whydrop refuses to start in a VM-backed Docker (Docker Desktop on Windows/macOS, WSL): it would be measuring the VM's virtual network, not yours. Use Linux with `network_mode: host`, or run it natively.
 
