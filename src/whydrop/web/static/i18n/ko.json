@@ -194,7 +194,7 @@
   "why.rst": "RST로 끊김",
   "why.norst": "RST 없음",
   "why.na": "–",
-  "fact.dur": "{dur}초 동안, 끊긴 구간: {segs}",
+  "fact.dur": "{dur}초 동안, 시간 초과가 난 구간: {segs}",
   "fact.gw": "공유기 확인: {sent}번 중 {ok}번 응답, 평소 {base} ms, 최대 {peak} ms",
   "fact.line": "공유기 너머: 프로브 {sent}개 중 제때 {ok}, 늦게 {late}, 손실 {lost}",
   "fact.stream": "UDP 스트림: 올라가는 길 손실 {up}, 내려오는 길 손실 {down}",
