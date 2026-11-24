@@ -34,7 +34,7 @@ That's basic mode: no account, no server, nothing to configure. Run it on a mach
 ## What it tells you
 
 - **Where it broke**, hop by hop: *this device → Wi-Fi or cable → router → internet line → DNS*. The dashboard draws that path as a cable that visibly breaks at the failing hop.
-- **The likely cause**, from rules you can read in [docs/design](https://github.com/YHK0427/whydrop/blob/main/docs/design.md): Wi-Fi problem, wired link, the host's own network config, router, public IP change, NAT state lost or reset, DNS (router, ISP, public resolvers blocked, or all of them), a line drop in the ISP segment, a lossy line, or queueing. Every verdict says *likely*: whydrop infers, it doesn't know.
+- **The likely cause**, from rules you can read in [docs/design](https://github.com/YHK0427/whydrop/blob/main/docs/design.md): Wi-Fi problem, wired link, the host's own network config, router, public IP change, NAT state lost or reset, DNS (router, ISP, public resolvers blocked, or all of them), a line drop in the ISP segment, a lossy line, or queueing. A cause is an inference, so every drop shows **why**: the measurements it rests on (the router's RTT, how many replies from beyond it came back and how late, upload vs. download loss, TCP retransmissions and RST) and the causes they rule out.
 - **What to do next**, in one sentence per cause.
 - **Rough patches** that aren't outages: packet loss, high latency from queueing, weak Wi-Fi signal, loss between Wi-Fi and the router.
 - **Evidence you can hand over**: a plain-text summary for a support chat, CSV/JSON exports, a card image, and a public-view bug report with addresses removed.

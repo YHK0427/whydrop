@@ -8,7 +8,7 @@ The rules whydrop uses to decide, with every threshold. All thresholds live in `
 
 - Become an uptime monitor.
 - Be useless without a reflector: basic mode needs no server.
-- State a cause as certain. Every cause reads "likely" (a test checks every string).
+- State a cause as certain. A cause is an inference, so each verdict shows the measurements it rests on and the causes they rule out ("Why this verdict": the router's RTT, how many replies from beyond it came back and how late, upload vs. download loss, TCP retransmissions, RST, Wi-Fi events, an IP change); the stored labels still read "likely" (a test checks every string).
 - Invent drops. Specifically not: a target that was never reachable, a single dying target, the agent's own host stalling, the reflector alone being down, normal Wi-Fi roaming, a VPN tunnel mistaken for the line, Docker Desktop's VM network mistaken for the home network.
 - Become an amplifier: the reflector never answers more bytes than it received.
 - Disturb other services on a shared server, or use more than 8 kbit/s (basic) / 20 kbit/s (precision) in total.

@@ -1,6 +1,7 @@
 """Exports (spec §8): CSV/JSON tables, the ±10 min bug report (always public view) and the plain-text summary
 for an ISP support chat (private view: absolute local time with its UTC offset)."""
 import csv
+import functools
 import io
 import json
 import sqlite3
@@ -63,6 +64,32 @@ def bugreport(db, iid: int, now_ms: int) -> dict | None:
                     "('udp_stream','line_hb','stun','tcp_connect','canary','gateway') ORDER BY ts_ms LIMIT 60000", (a, b))]}
 
 
+@functools.cache
+def _words(lang: str) -> dict:
+    from importlib.resources import files
+    return json.loads((files("whydrop.web") / "static" / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))
+
+
+def _why_lines(ev: dict, lang: str) -> list[str]:
+    """The dashboard's "Why this verdict" lines, in the same words (i18n fact.* / ruled.*)."""
+    w = _words("ko" if lang == "ko" else "en")
+    seg = SEGMENT_WORDS.get(lang, SEGMENT_WORDS["en"])
+    out = []
+    for kind, mark in (("facts", "+"), ("ruled_out", "-")):
+        for x in ev.get(kind) or []:
+            vals = {k: ("–" if v is None else v) for k, v in x.items()}
+            if "segs" in x:
+                vals["segs"] = ", ".join(dict.fromkeys(seg.get(s, s) for s in x["segs"])) or "–"
+            if "classes" in x:
+                vals["classes"] = ", ".join(dict.fromkeys(seg.get(s, s) for s in x["classes"]))
+            if x.get("k") == "tcp":
+                vals["rst"] = w["why.rst" if x.get("rst") else "why.norst"]
+            tpl = w.get(f"{'fact' if kind == 'facts' else 'ruled'}.{x.get('k')}")
+            if tpl:
+                out.append(f"  {mark} " + tpl.format(**vals))
+    return out
+
+
 def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: int | None = None) -> str | None:
     """Ready to paste into an ISP support chat: time with offset, duration, likely cause, next step, evidence."""
     inc = Q.incident(db, iid)
@@ -80,17 +107,23 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: i
         mins = max(0, round(((now_ms or time.time() * 1000) - inc["start_ms"]) / 60000))
         when = f"{mins} min ago" if lang != "ko" else f"{mins}분 전"
         ev = {k: mask_text(v) if isinstance(v, str) else v for k, v in ev.items()}
+    why = _why_lines(ev, lang)
     if lang == "ko":
         from whydrop.web.public import localized
         lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"추정 원인: {localized(ev.get('label', '-'), 'ko')}",
                  f"다음에 할 일: {localized(ev.get('next_step', '-'), 'ko')}"]
         if ev.get("protocol"):   # rows from before 0.1.1 have only the English one
             lines.append(f"프로토콜로 보면: {ev.get('protocol_ko') or ev['protocol']}")
+        if why:
+            lines.append("판단 근거:")
     else:
         lines = [f"Drop: {when}, {dur:.0f} s, {where}", f"Likely cause: {ev.get('label', '-')}",
                  f"What to do next: {ev.get('next_step', '-')}"]
         if ev.get("protocol"):
             lines.append(f"In protocol terms: {ev['protocol']}")
+        if why:
+            lines.append("Why:")
+    lines += why
     lines.append("Recorded by whydrop (rule " + str(inc.get("cause_final") or inc.get("primary_cause")) + ")")
     return "\n".join(lines)
 

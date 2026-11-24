@@ -182,3 +182,9 @@ dl.kv dt, dl.kv dd, table.data td { overflow-wrap: anywhere; }   /* grids and ta
 .scenetag { display: inline-block; margin-left: var(--s2); padding: 0 var(--s2); border: 1px dashed var(--ink-3); border-radius: 4px;
   font-size: 0.8em; color: var(--ink-2); font-weight: 400; }
 .drops-table td:nth-child(-n+2) { white-space: nowrap; }
+.why-list { list-style: none; padding: 0; margin: 0; }
+.why-list li { padding: 5px 0 5px 26px; position: relative; }
+.why-list li::before { position: absolute; left: 0; font-weight: 700; }
+.why-list li.seen::before { content: "✓"; color: var(--good); }
+.why-list li.ruled::before { content: "✗"; color: var(--ink-3); }
+.why-list li.ruled { color: var(--ink-2); }

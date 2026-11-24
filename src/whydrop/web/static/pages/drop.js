@@ -2,7 +2,7 @@
 import { lanes, series } from "../components/lanes.js";
 import { pathDiagram } from "../components/path.js";
 import { strip } from "../components/strip.js";
-import { api, dur, errorPanel, h, parseIncident, startMs, STATIC, t, toast, token, when } from "../lib.js";
+import { api, dur, errorPanel, h, parseIncident, segWord, startMs, STATIC, t, toast, token, when } from "../lib.js";
 
 const ORDER = ["host_net", "wifi", "lan", "line", "dns"];
 const REPO_ISSUES = "https://github.com/YHK0427/whydrop/issues/new";
@@ -25,6 +25,21 @@ function showText(main, text) {
 }
 
 const word = (v) => { const k = `evv.${v}`, w = t(k); return w === k ? String(v) : w; };   // "upload" → "업로드"; codes stay
+
+// The measurements behind a verdict, worded from i18n ("fact.*", "ruled.*"); older drops have none.
+export function whyLine(kind, x) {
+  const na = t("why.na"), v = (y) => (y == null ? na : y);
+  const vals = Object.fromEntries(Object.entries(x).map(([k, y]) => [k, v(y)]));
+  if (x.segs) vals.segs = x.segs.map(segWord).filter((w, i, a) => a.indexOf(w) === i).join(", ") || na;
+  if (x.classes) vals.classes = x.classes.map(segWord).join(", ");
+  if (kind === "fact" && x.k === "tcp") vals.rst = t(x.rst ? "why.rst" : "why.norst");
+  return t(`${kind}.${x.k}`, vals);
+}
+const whyPanel = (d) => (d.facts.length ? [h("section", { class: "panel why" }, h("h2", {}, t("why.title")),
+  h("div", { class: "split" },
+    h("div", {}, h("h3", {}, t("why.seen")), h("ul", { class: "why-list" }, d.facts.map((x) => h("li", { class: "seen" }, whyLine("fact", x))))),
+    d.ruled.length ? h("div", {}, h("h3", {}, t("why.ruled")), h("ul", { class: "why-list" }, d.ruled.map((x) => h("li", { class: "ruled" }, whyLine("ruled", x))))) : null))]
+  : []);   // an array: replaceChildren(null) would print "null"
 
 function frozenPath(d, link) {
   const down = new Set(d.home ? ["wifi"] : d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
@@ -76,8 +91,9 @@ export async function mount(main, { id, refresh }) {
   } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
 
   const durS = d.end ? (d.end - d.start) / 1000 : (Date.now() - d.start) / 1000;
-  const headline = d.segs.length ? t(d.slow ? "drop.headline_slow" : "drop.headline", { seg: d.segs[0], dur: dur(durS), cause: d.label })
-    : t("drop.headline_point", { cause: d.label });
+  const causeText = d.facts.length ? d.label.replace(/\s*\((likely|추정)\)$/, "") : d.label;   // the measurements below say how it was decided
+  const headline = d.segs.length ? t(d.slow ? "drop.headline_slow" : "drop.headline", { seg: d.segs[0], dur: dur(durS), cause: causeText })
+    : t("drop.headline_point", { cause: causeText });
   const label = ann.find(a => a.label === "reproduced" || a.label === "injected" || a.label === "user-test");
 
   const actions = h("div", { class: "row" },
@@ -97,7 +113,7 @@ export async function mount(main, { id, refresh }) {
       t("drop.wrong")));
 
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);   // cause_X repeats the incident's own X
-  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "protocol_ko", "events", "cause_where"].includes(k)
+  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "protocol_ko", "events", "cause_where", "facts", "ruled_out"].includes(k)
     && !(k.startsWith("cause_") && same(d.evidence[k.slice(6)], v)));
   const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });
@@ -109,9 +125,12 @@ export async function mount(main, { id, refresh }) {
       label ? h("p", { class: "labelbanner" }, t(`label.${label.label}`)) : null,
       h("h1", { class: "headline" }, headline),
       h("p", { class: "when" }, `${when(d.start)}`, " ", h("span", { class: "faint" }, t("drop.rule", { rule: d.rule })), " ",
-        h("span", { class: "faint" }, d.final ? t("drop.final") : t("drop.settling"))),
+        h("span", { class: "faint" }, d.final ? t("drop.final") : t("drop.settling")),
+        d.facts.length ? [" ", h("a", { href: "#why", onclick: (e) => { e.preventDefault(); main.querySelector(".why")?.scrollIntoView({ behavior: "smooth" }); } },
+          t("why.count", { n: d.facts.length }))] : null),
       actions,
       pathDiagram(frozenPath(d, st?.link), { frozen: true, vertical: window.matchMedia("(max-width: 640px)").matches })),
+    ...whyPanel(d),
     h("section", { class: "panel" }, h("h2", {}, t("drop.next")), h("p", { class: "protocol" }, d.next || "–")),
     h("section", { class: "panel" }, h("h2", {}, t("drop.timeline")), h("h3", {}, t("drop.strip")), strip(ringRows), lanesEl),
     ...(d.protocol ? [h("section", { class: "panel" }, h("h2", {}, t("drop.protocol")), h("p", { class: "protocol" }, d.protocol))] : []),
