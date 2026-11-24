@@ -60,6 +60,8 @@ class Incidents:
 
     def _close(self, inc: Incident, t: int, out: list) -> None:
         inc.end_ms = t
+        if t - inc.start_ms <= K.LONG_OUTAGE_S * 1000:
+            inc.tags.discard("long_outage")             # tagged while the recovery was being confirmed, but not past 1 h
         self.current, self.last = None, inc
         out.append(IncidentChange("close", inc))
 

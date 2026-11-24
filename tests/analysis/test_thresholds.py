@@ -319,6 +319,13 @@ def test_line_drop_after_a_wifi_drop_joins_without_router_restart():
     assert f.incident.segments == {"wifi", "line"} and texts.ROUTER_RESTART not in f.incident.chain
 
 
+@pytest.mark.parametrize("secs, tagged", [(59, False), (60, False), (61, True)])   # past LONG_OUTAGE_S
+def test_long_outage(monkeypatch, secs, tagged):
+    monkeypatch.setattr(K, "LONG_OUTAGE_S", 60)
+    [i] = incidents(engine(Scenario.default(250).internet_down(30, 30 + secs)))
+    assert sec(i.end_ms) - sec(i.start_ms) == secs and ("long_outage" in i.tags) == tagged
+
+
 def test_settle():
     [(at, f)] = [(t, c.obj) for t, c in engine(Scenario.default(200).internet_down(30, 40)) if c.type == "final"]
     assert at - sec(f.incident.end_ms) == K.SETTLE_S
