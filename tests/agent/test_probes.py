@@ -245,3 +245,36 @@ def test_stun_pair_ids_use_the_name_and_public_ip_carries_over():
     pairs = sorted(r.pair.split(":")[1] for r in out if hasattr(r, "probe"))
     assert pairs == ["stun.example", "stun2.example"]
     assert not [x for x in out if getattr(x, "kind", None)]  # same public IP as before: no ip_change
+
+TWO_DEFAULTS = """Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+eth0\t00000000\t016433C6\t0003\t0\t0\t600\t00000000\t0\t0\t0
+wlan0\t00000000\t010200C0\t0003\t0\t0\t100\t00000000\t0\t0\t0
+"""
+WIN_TWO_DEFAULTS = WINDOWS_ROUTE.replace(
+    "          0.0.0.0          0.0.0.0      192.0.2.1     192.0.2.50     35",
+    "          0.0.0.0          0.0.0.0  198.51.100.1  198.51.100.50     55\n"
+    "          0.0.0.0          0.0.0.0      192.0.2.1     192.0.2.50     35")
+
+
+def test_two_default_routes_pick_the_lowest_metric():
+    assert host_net.parse_linux_route(TWO_DEFAULTS) == ("192.0.2.1", "wlan0")  # the one the kernel uses
+    assert host_net.parse_windows_route(WIN_TWO_DEFAULTS) == ("192.0.2.1", "192.0.2.50")
+
+
+def test_ipv6_only_host_is_host_net_down_not_a_crash(monkeypatch):
+    v6_only = LINUX_ROUTE.splitlines()[0] + "\n"  # no IPv4 routes at all
+    assert host_net.parse_linux_route(v6_only) == (None, None)
+
+    async def no_route():
+        return host_net.parse_linux_route(v6_only)
+
+    class NoV4(socket.socket):
+        def connect(self, addr):
+            raise OSError(101, "Network is unreachable")
+    with monkeypatch.context() as m:
+        m.setattr(host_net.socket, "socket", NoV4)
+        assert host_net.source_address() is None
+    monkeypatch.setattr(host_net, "default_route", no_route)
+    monkeypatch.setattr(host_net, "source_address", lambda: None)
+    r = asyncio.run(host_net.probe(NOW))
+    assert not r.ok and r.detail == {"route": False, "addr": False, "iface": None}
