@@ -65,7 +65,7 @@ export async function mount(main, { refresh }) {
   const running = nat.running;
   const btn = isPublic ? null : h("button", { class: "btn primary", type: "button", disabled: running ? true : null, onclick: async () => {
     try { await api("/api/nat/run", { method: "POST" }); refresh(); }
-    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: "nat", code: e.code })); }
+    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: t("what.nat"), code: e.code })); }
   } }, t("nat.run"));
   const progress = running ? h("p", { class: "muted", "aria-live": "polite" }, t("nat.running", {
     proto: (running.last?.proto || "udp").toUpperCase(), delay: running.last?.delay_s ?? "…", done: running.done, total: running.total })) : null;

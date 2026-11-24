@@ -36,7 +36,7 @@ function frozenPath(d, link) {
 async function download(path, name) {
   const headers = token() ? { Authorization: `Bearer ${token()}` } : {};
   const r = await fetch(path, { headers });
-  if (!r.ok) { toast(t("error.load", { what: name, code: r.status })); return; }
+  if (!r.ok) { toast(t("error.load", { what: t("what.bugreport"), code: r.status })); return; }
   const url = URL.createObjectURL(await r.blob());
   const a = h("a", { href: url, download: name });
   document.body.append(a); a.click(); a.remove();
@@ -84,7 +84,7 @@ export async function mount(main, { id, refresh }) {
     h("button", { class: "btn", type: "button", onclick: async () => {
       let text;
       try { text = await api(`/api/incidents/${id}/summary?lang=${document.documentElement.lang}`); }
-      catch (e) { toast(t("error.load", { what: "summary", code: e.code || "?" })); return; }
+      catch (e) { toast(t("error.load", { what: t("what.summary"), code: e.code || "?" })); return; }
       if (await copyText(text)) toast(t("drop.copied"));
       else showText(main, text);   // http://<LAN IP> is not a secure context: no clipboard API there
     } }, t("drop.copy")),

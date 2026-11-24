@@ -84,7 +84,7 @@ export async function mount(main, { refresh }) {
     try {
       await api("/api/annotations", { method: "POST", json: { start_ms: Date.now(), end_ms: Date.now() + 120000, label: "user-test" } });
       toast(t("test.started"));
-    } catch (e) { toast(t("error.load", { what: "annotation", code: e.code || "?" })); }
+    } catch (e) { toast(t("error.load", { what: t("what.annotation"), code: e.code || "?" })); }
     setTimeout(() => { ev.target.disabled = false; }, 120000);
   } }, t("test.button"));
   const data = series(samples, st?.mode || "basic");
