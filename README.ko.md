@@ -111,7 +111,7 @@ docker compose exec whydrop whydrop nat-test
 
 **정밀 모드에 유료 VPS가 필요한가요?** 아니요. reflector에는 공인 IP와 열린 포트 하나(UDP와 TCP 48100)만 있으면 돼요. 무료 티어 VM으로 충분해요.
 
-**IPv6는요?** v0.1은 IPv4를 재요. 듀얼 스택 네트워크에서도 돌지만, IPv6 경로를 따로 판정하지는 않아요.
+**IPv6는요?** whydrop은 IPv4를 재요. 듀얼 스택 네트워크에서도 돌지만, IPv6 경로를 따로 판정하지는 않아요.
 
 **Docker Desktop, WSL, VM은요?** VM 위의 Docker(Windows/macOS의 Docker Desktop, WSL)에서는 일부러 시작하지 않아요. 내 네트워크가 아니라 VM의 가상 네트워크를 재게 되니까요. Linux에서 `network_mode: host`로 돌리거나, 직접 설치해서 돌리세요.
 

@@ -105,3 +105,22 @@ Notable catches from the reviews and measurements:
 - Linux conntrack only applies the 120 s UDP timer to flows still active more than 2 s after the first packet, so the NAT test keeps the exchange alive for 3 s (verified in kernel source).
 - Windows `time.monotonic()` ticks in ~15 ms steps on Python ≤ 3.12 (3.13 switched to QPC); all timing uses `perf_counter_ns()`.
 - Random packet loss alone would have produced about 19 false "line drop" incidents per hour at 10% loss. The fix (only public probes vote, and short drops inside a lossy period are reported as part of it) brought that to 0 in simulation while still catching every 3.0 s drop.
+
+## 2026-11-23 to 11-24 — The full audit
+
+The owner looked at the finished project and said it was full of errors: every feature, every edge case, from the smallest unit up. The agent wrote an audit plan first (each module: branch coverage, the cases at each threshold and one step either side, a test for every missing case, a deliberate break of the code to prove each new test can fail, a root-cause fix with the failing test first, an independent review per layer).
+
+| Step | What the agent did | What the human decided |
+|---|---|---|
+| Known defects first | 15 found while planning, among them the worst of the project: the 6 h, 24 h and 7 d charts were empty for an install's first week, because minute rows were only made from 1-second rows older than 7 days. It is visible in the first demo video. Checked on a copy of the home database: the rolled-up charts now equal the raw 1-second result on every series | "Plan first", then "go on" |
+| Five layers in parallel | The reflector, the probes, precision mode, the analysis rules and the dashboard states were audited by five agents in separate worktrees; the agent merged their branches after reading them | "Go with your recommendations, faster" |
+| Replay writes | `whydrop replay --write` rewrites stored verdicts after a backup. Its first run on the home database paired a stored router drop with a DNS drop that only overlapped in time, then left stale "router problem" verdicts because the segments differed; both rules were fixed on the real output before the home database was rewritten | Rewrite past verdicts (with a backup), keep the original video |
+| Submission | Report, demo, GIFs and a new captions-only promo video recorded from the re-exported demo | No voice-over, captions only, service-intro style |
+
+Counts: 46 review and audit agents in all, roughly 600 findings; this audit fixed 37 user-visible defects (CHANGELOG 0.2.0) and the test suite grew from about 550 to 833 tests.
+
+What the agent got wrong and caught on real data or in review:
+- It claimed `host:abc` as a reflector address crashed precision start-up; an existing test showed it was already handled (precision off with the reason). The config check was moved back to that path.
+- Its first alert-rate cap counted failed sends and let retries bypass the cap; a review found both.
+- Several flaky tests were not timing luck: Hyper-V reserves blocks of 100 TCP and UDP ports inside the Windows dynamic range and moves them, so a test that bound a UDP port and then the same TCP number failed in bursts.
+- A memory rise on the home server (40 → 54 MiB over 40 h) was measured with tracemalloc before any change, rather than guessed at.
