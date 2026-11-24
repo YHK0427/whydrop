@@ -118,6 +118,7 @@ def rewrite(db: Path, backup: Path) -> list[dict]:
             new = {k: v for k, v in old.items() if not k.startswith("cause_")}   # the old rule's own evidence goes
             new.update(cause=c.rule, label=c.label, next_step=c.next_step, secondary=c.secondary,
                        protocol=inc.evidence.get("protocol", ""), protocol_ko=inc.evidence.get("protocol_ko", ""),
+                       facts=inc.evidence.get("facts", []), ruled_out=inc.evidence.get("ruled_out", []),
                        **{f"cause_{k}": v for k, v in c.evidence.items()})
             if new == old:
                 out.append({**row, "status": "same", "new": c.label})

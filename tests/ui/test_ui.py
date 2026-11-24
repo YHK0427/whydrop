@@ -629,3 +629,36 @@ def test_language_theme_and_table_toggles(browser, base):
     ctx.close()
     assert [t for t, _ in themes] == ["light", "dark", "system"] and themes[0][1] != themes[1][1], themes
     assert as_table == ("true", 1) and as_chart == ("false", 1) and ko == (["ko", "ko"], "지금") and not errors, (as_table, as_chart, ko, errors)
+
+
+@pytest.mark.parametrize("lang,seen,ruled", [("ko", "공유기 확인: 11번 중 11번 응답, 평소 3 ms, 최대 412 ms", "회선 단절 아님"),
+                                            ("en", "Router check: 11 of 11 answered, usually 3 ms, up to 412 ms", "Not a line outage")])
+def test_a_verdict_shows_its_measurements_instead_of_likely(browser, base, lang, seen, ruled):
+    """Owner feedback: '(likely)' on every verdict reads as a guess. The drop page now shows what was measured and
+    which causes it rules out, and the headline drops the suffix."""
+    import json as _json
+
+    def with_facts(route):
+        body = _json.loads(route.fetch().text())
+        ev = {"label": "In-home queueing (likely)", "cause": "R7", "cause_where": "home",
+              "facts": [{"k": "dur", "dur": 8, "segs": ["line"]}, {"k": "gw", "sent": 11, "ok": 11, "lost": 0, "late": 0, "base": 3, "peak": 412},
+                        {"k": "line", "sent": 24, "ok": 0, "late": 24, "lost": 0, "peak": None},
+                        {"k": "tcp", "stall": 3.03, "retrans": 1, "rto_lo": 0.22, "rto_hi": 5.79, "rst": False}],
+              "ruled_out": [{"k": "router", "ok": 11, "sent": 11}, {"k": "line_late", "late": 24, "sent": 24}, {"k": "ip"}]}
+        body.update(primary_cause="R7", cause_final="R7", evidence_json=_json.dumps(ev),
+                    tags_json=_json.dumps({"segments": ["line"], "tags": [], "chain": [], "point": None}))
+        route.fulfill(content_type="application/json", body=_json.dumps(body))
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    ctx.add_init_script(f"localStorage.setItem('whydrop.lang','{lang}')")
+    page = ctx.new_page()
+    page.route(re.compile(r".*/api/incidents/1(\?.*)?$"), with_facts)
+    page.goto(f"{base}/#/drop/1")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(600)
+    head = page.inner_text("h1.headline")
+    why = page.inner_text("main section.why")
+    main = page.inner_text("main")
+    ctx.close()
+    assert "(추정)" not in head and "(likely)" not in head
+    assert seen in why and ruled in why and ("RST 없음" in why if lang == "ko" else "no RST" in why)
+    assert not re.search(r"\b(fact|ruled|why)\.[a-z_]+", main), main

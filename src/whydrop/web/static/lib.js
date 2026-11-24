@@ -138,7 +138,7 @@ export function parseIncident(r) {
   const segs = home ? [t("seg.home")] : [...new Set((tags.segments || []).map(segWord))];
   const rule = r.cause_final || r.primary_cause || r.cause;
   return { id: r.id, start, end, open: end == null, segs, raw: tags.segments || [], point: tags.point, tags: tags.tags || [],
-           home, slow: String(rule || "").startsWith("R7"),   // queueing slows a path down; it doesn't cut it
+           home, slow: String(rule || "").startsWith("R7"), facts: ev.facts || [], ruled: ev.ruled_out || [],   // queueing slows a path down; it doesn't cut it
            chain: tags.chain || [], label: cause(ev.label || ""), next: cause(ev.next_step || ""), protocol: (lang === "ko" && ev.protocol_ko) || ev.protocol || "",
            rule, final: r.cause_final != null || r.final,
            changed: !!r.cause_changed, provisional: ev.provisional, evidence: ev };

@@ -196,3 +196,27 @@ def test_csv_text_that_a_spreadsheet_would_run_is_made_literal(tmp_path):
     rows = [{"id": 1, "kind": "=HYPERLINK(\"http://x.example\")", "note": "@SUM(1)", "neg": -5, "detail_json": "{\"a\": 1}"}]
     body, _ = render("events", rows, "csv", False, NOW)
     assert "'=HYPERLINK" in body and "'@SUM" in body and ",-5," in body and "\"{\"\"a\"\": 1}\"" in body
+
+
+def test_summary_carries_the_measurements_behind_the_verdict(tmp_path):
+    path = tmp_path / "w.db"
+    facts = [{"k": "dur", "dur": 8, "segs": ["line"]}, {"k": "gw", "sent": 11, "ok": 11, "lost": 0, "late": 0, "base": 3.0, "peak": 412.0},
+             {"k": "line", "sent": 24, "ok": 0, "late": 24, "lost": 0, "peak": None}]
+    ruled = [{"k": "router", "ok": 11, "sent": 11}, {"k": "line_late", "late": 24, "sent": 24}]
+
+    async def go():
+        s = Store(path)
+        await s.open()
+        await s.insert("incidents", start_ms=NOW - 9_000, end_ms=NOW - 1_000, primary_cause="R7", cause_final="R7",
+                       tags_json=json.dumps({"tags": [], "segments": ["line"], "chain": [], "point": None}),
+                       evidence_json=json.dumps({"label": "In-home queueing (likely)", "cause": "R7", "cause_where": "home",
+                                                 "facts": facts, "ruled_out": ruled}))
+        await s.close()
+    asyncio.run(go())
+    c = client(path)
+    iid = c.get("/api/incidents").json()[0]["id"]
+    ko = c.get(f"/api/incidents/{iid}/summary?lang=ko").text
+    en = c.get(f"/api/incidents/{iid}/summary").text
+    assert "판단 근거:" in ko and "공유기 확인: 11번 중 11번 응답, 평소 3.0 ms, 최대 412.0 ms" in ko and "회선 단절 아님" in ko
+    assert "Why:" in en and "+ Router check: 11 of 11 answered" in en and "- Not a line outage: 24 of 24" in en
+    assert c.get(f"/api/incidents/{iid}?public=1").json()["evidence"]["facts"] == facts

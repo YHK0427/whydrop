@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from whydrop.analysis.causes import Settler, classify, label_period, protocol_paragraph
 from whydrop.analysis.conditions import Conditions
+from whydrop.analysis.explain import explain
 from whydrop.analysis.incidents import Incident, Incidents
 from whydrop.analysis.model import Context, Frame
 from whydrop.analysis.segments import Segments
@@ -42,5 +43,6 @@ class Engine:
         for f in finals:
             f.incident.evidence["protocol"] = protocol_paragraph(f.incident)
             f.incident.evidence["protocol_ko"] = protocol_paragraph(f.incident, "ko")
+            f.incident.evidence.update(explain(f.incident, self.frames, self.ctx, f.cause.rule))   # facts and ruled_out
             out.append(Change("final", f, f.cause))
         return out
