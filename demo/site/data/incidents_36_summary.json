@@ -1,1 +1,1 @@
-"Drop: 2583 min ago, 0 s, idle_state_lost\nLikely cause: NAT/firewall state lost (likely)\nWhat to do next: Set keepalive to the value nat-test recommends, or less\nRecorded by whydrop (rule R5)"
+"Drop: 2750 min ago, 0 s, idle_state_lost\nLikely cause: NAT/firewall state lost (likely)\nWhat to do next: Set keepalive to the value nat-test recommends, or less\nRecorded by whydrop (rule R5)"

@@ -1,0 +1,4 @@
+끊김: 123분 전, 0초, idle_state_lost
+추정 원인: NAT/방화벽 연결 상태 만료 (추정)
+다음에 할 일: 유휴 간격이 측정된 NAT 타임아웃보다 길어요. keepalive를 그보다 짧게 설정하세요
+Recorded by whydrop (rule R5)

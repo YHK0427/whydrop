@@ -1,1 +1,1 @@
-{"link":"wifi","baseline":"ready","mode":"precision","public":true,"segments":{"host_net":"up","wifi":"up","lan":"up","line":"up","dns":"up"},"month":{"availability":99.991,"drops":11,"down_s":181}}
+{"segments":{"host_net":"up","wifi":"up","lan":"up","line":"up","dns":"up"},"link":"wifi","baseline":"ready","mode":"precision","public":true,"month":{"availability":99.991,"drops":11,"down_s":181}}

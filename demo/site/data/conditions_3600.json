@@ -1,1 +1,1 @@
-[{"kind":"loss","start_s":-50,"end_s":null,"detail":{"loss":0.1,"where":"line","cause":"R6","label":"Lossy line (likely)"}},{"kind":"loss","start_s":-497,"end_s":-451,"detail":{"loss":0.077,"where":"line","cause":"R6","label":"Lossy line (likely)"}}]
+[]
