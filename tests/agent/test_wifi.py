@@ -74,6 +74,58 @@ def test_netsh_garbage_is_empty_not_error():
     assert wifi.parse_netsh("no wireless interface\n") == {"connected": False}
 
 
+NETSH_JA = """
+システムに 1 インターフェイスがあります:
+
+    名前                   : Wi-Fi
+    説明                   : Example Wireless Adapter
+    物理アドレス           : 02:00:00:00:00:aa
+    状態                   : 接続されました
+    SSID                   : example-ssid
+    BSSID                  : 02:00:00:00:00:05
+    無線の種類             : 802.11ac
+    チャネル               : 36
+    シグナル               : 90%
+    プロファイル           : example-ssid
+"""
+NETSH_EN_DOWN = """
+There is 1 interface on the system:
+
+    Name                   : Wi-Fi
+    Physical address       : 02:00:00:00:00:aa
+    State                  : disconnected
+    Radio status           : Hardware On
+"""
+
+
+def test_netsh_unknown_locale_decides_by_bssid():
+    d = wifi.parse_netsh(NETSH_JA)  # state word not known: a listed BSSID means associated
+    assert d["connected"] is True and d["bssid"] == "02:00:00:00:00:05" and "signal_pct" not in d
+    ja_down = "\n".join(x for x in NETSH_JA.splitlines() if "SSID" not in x).replace("接続されました", "切断されました")
+    assert wifi.parse_netsh(ja_down)["connected"] is False
+    de = NETSH_EN.replace("State      ", "Status     ").replace("connected", "Verbunden")
+    assert wifi.parse_netsh(de)["connected"] is True
+
+
+def test_netsh_variants_never_crash(monkeypatch):
+    assert wifi.parse_netsh(NETSH_EN_DOWN) == {"connected": False, "state": "disconnected"}
+    assert wifi.parse_netsh("There is no wireless interface on the system.\n") == {"connected": False}
+    assert wifi.parse_netsh("") == {"connected": False}
+    no_signal = "\n".join(x for x in NETSH_EN.splitlines() if "Signal" not in x and "Rssi" not in x)
+    d = wifi.parse_netsh(no_signal)
+    assert d["connected"] and "signal_pct" not in d and "rssi_dbm" not in d
+    assert wifi.parse_netsh(NETSH_EN.replace("82%", "n/a").replace("-37", "?"))["connected"]
+    roaming = NETSH_EN.replace(": connected", ": associating")  # mid-roam: not associated yet
+    assert wifi.parse_netsh(roaming)["connected"] is False
+
+    for text in (NETSH_EN_DOWN, NETSH_JA, roaming, "", "\xff\xfe garbage : : :"):
+        async def fake_run(*a, text=text, **k):
+            return text
+        monkeypatch.setattr(wifi, "_run", fake_run)
+        s = asyncio.run(wifi.WindowsWifi().snapshot())
+        assert s is not None and (s.bssid is None) == (not s.up)
+
+
 def test_iw_parsers():
     assert wifi.parse_proc_wireless(PROC_WIRELESS, "wlan0") == -40.0
     assert wifi.parse_proc_wireless(PROC_WIRELESS, "wlan1") is None

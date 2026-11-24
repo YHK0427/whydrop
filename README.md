@@ -125,7 +125,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 |---|---|---|---|
 | Linux (Docker, host network) | ✓ | ✓ | ✓ (`iw`) |
 | Linux (from source: `pip install '.[web]'`) | ✓ | ✓ | ✓ |
-| Windows (native, from source) | ✓ | ✓ (no `TCP_INFO`) | ✓ (`netsh`, English or Korean) |
+| Windows (native, from source) | ✓ | ✓ (no `TCP_INFO`) | ✓ (`netsh`, English or Korean; other languages: associated or not, and which AP) |
 | Docker Desktop / WSL | refused on purpose | — | — |
 | Raspberry Pi and other arm64 / armv7 | images are built and smoke-tested under emulation on release; not yet tried on hardware | | |
 
