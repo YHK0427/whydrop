@@ -65,16 +65,15 @@ class StreamBook:
         s = self.pending.get(e.seq)
         if s is None:
             return
-        if self.epoch is not None and e.epoch != self.epoch and self.echoes and e.seq < self.echoes[-1].seq:
-            return  # a delayed ECHO from before a reflector restart: ignore it
-        self.epoch = e.epoch
-        prev = self.echoes[-1] if self.echoes else None
-        if prev is not None and e.seq - prev.seq > OUTAGE_GAP:
-            got = sum(1 for x in self.echoes if prev.seq < x.seq <= e.seq) + 1
-            tot = outage_totals(prev, e, got)
-            self.outages.append({"from_seq": prev.seq, "to_seq": e.seq, "lost_up": tot.up, "lost_down": tot.down,
-                                 "status": tot.status, "ts_ms": now_ms})
-        self.echoes.append(e)
+        prev = max(self.echoes, key=lambda x: x.seq) if self.echoes else None  # highest seq: ECHOs can come reordered
+        stale = self.epoch is not None and e.epoch != self.epoch and prev is not None and e.seq < prev.seq
+        if not stale:  # an ECHO delayed from before a reflector restart ends its round trip; its counters are old
+            self.epoch = e.epoch
+            if prev is not None and e.seq - prev.seq > OUTAGE_GAP:
+                tot = outage_totals(prev, e, 1)  # of the seqs after prev (the highest answered), only e came back
+                self.outages.append({"from_seq": prev.seq, "to_seq": e.seq, "lost_up": tot.up, "lost_down": tot.down,
+                                     "status": tot.status, "ts_ms": now_ms})
+            self.echoes.append(e)
         if s.final:
             if s.dir in ("up", "down", "unknown") and s.echo_after_ms is None and not s.late_counted \
                     and now_ms - _bucket(s.t_ms) <= LATE_MS:

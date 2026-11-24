@@ -246,3 +246,81 @@ def test_unsent_slots_dont_use_up_seqs():
         return st
     st = asyncio.run(main())
     assert st._seq == 0 and st.book.pending and all(k < 0 and s.local_fail for k, s in st.book.pending.items())
+
+
+def test_reordered_late_echo_makes_no_false_outage():
+    book = StreamBook()
+    for seq in range(1, 122):
+        book.sent(seq, 10_000 + seq * 100)
+    for seq in range(1, 121):
+        if seq != 50:
+            book.echo(Echo(seq, seq, 1, 0xFFFFFFFF), 20.0, 10_020 + seq * 100)
+    book.echo(Echo(50, 50, 1, 0xFFFFFFFF), 7000.0, 22_000)     # overtaken by 70 later ECHOs, inside the 11 s window
+    book.echo(Echo(121, 121, 1, 0xFFFFFFFF), 20.0, 22_120)
+    assert book.outages == []                                    # nothing was lost: no outage, no "lost_down"
+
+
+def test_delayed_echo_from_before_a_restart_is_a_round_trip():
+    book = StreamBook()
+    for seq in (1, 2, 3):
+        book.sent(seq, 10_000 + seq * 100)
+    book.echo(Echo(1, 1, 1, 0), 20.0, 10_120)
+    book.echo(Echo(3, 1, 2, 0), 20.0, 10_320)                      # the restarted reflector answers seq 3
+    book.echo(Echo(2, 2, 1, 0b1), 1500.0, 11_700)                  # the old boot's answer to seq 2, held in a queue
+    [row], _ = book.finalize(now_ms=14_000)
+    assert (row.ok, row.lost) == (3, 0) and book.epoch == 2 and book.echoes[-1].seq == 3
+
+
+def test_duplicated_echoes_count_once():
+    book = StreamBook()
+    book.sent(1, 10_000)
+    book.sent(2, 10_100)
+    book.echo(Echo(1, 1, 1, 0), 20.0, 10_020)
+    book.echo(Echo(1, 1, 1, 0), 25.0, 10_030)                      # the network duplicated it
+    [row], _ = book.finalize(now_ms=14_000)
+    assert (row.sent, row.ok, row.lost) == (2, 1, 1)
+    book.echo(Echo(2, 2, 1, 0b1), 5000.0, 15_100)                  # seq 2 late, twice
+    book.echo(Echo(2, 2, 1, 0b1), 5100.0, 15_200)
+    assert book.finalize(now_ms=15_300)[1] == [(10_000, "unknown")]
+
+
+def test_gap_longer_than_the_bitmap():
+    book = StreamBook()
+    book.sent(1, 10_100)
+    book.echo(Echo(1, 1, 1, 0), 20.0, 10_120)
+    for seq in range(2, 62):
+        book.sent(seq, 10_000 + seq * 100)
+    book.echo(Echo(61, 18, 1, 0xFFFF), 20.0, 16_120)               # seqs 45..60 reached the reflector, 2..44 did not
+    rows, _ = book.finalize(now_ms=20_000)
+    total = {k: sum(getattr(r, k) for r in rows) for k in ("lost", "lost_up", "lost_down", "lost_dir_unknown")}
+    assert total == {"lost": 59, "lost_up": 16, "lost_down": 16, "lost_dir_unknown": 27}  # 2..28: older than 32 seqs
+    [o] = book.outages
+    assert (o["lost_up"], o["lost_down"], o["status"]) == (43, 16, "ok")   # the counters still cover the whole gap
+
+
+def test_local_send_error_is_local_fail_not_loss(monkeypatch):
+    import errno
+    import sys
+    monkeypatch.setattr(sys, "platform", "win32")
+    st = UdpStream(("127.0.0.1", 9), S, _Sink())
+    st._seq = 1
+    st.book.sent(1, 10_000)
+    st._on_error(OSError(errno.ENETUNREACH, "network is unreachable"))     # no route on this host
+    st._seq = 2
+    st.book.sent(2, 10_100)
+    st._on_error(ConnectionResetError(10054, "port unreachable"))         # Windows WSAECONNRESET: an ICMP error
+    [row], _ = st.book.finalize(now_ms=14_000)
+    assert (row.sent, row.local_fail, row.lost) == (2, 1, 1) and st._deaf  # deaf: the send loop reopens the socket
+
+
+def test_reflector_restart_event_once():
+    from whydrop.proto import wd
+    from whydrop.proto.wd import WdPacket, WdType
+    events = []
+    st = UdpStream(("127.0.0.1", 9), S, _Sink(), on_event=events.append)
+    st._ip = "127.0.0.1"
+    for seq, epoch in ((1, 1), (2, 1), (3, 2), (4, 2)):
+        st.book.sent(seq, 1000 + seq * 100)
+        st._on_datagram(wd.encode(WdPacket(WdType.ECHO, st.session_id, seq, 0, recv_count=seq, epoch=epoch), S),
+                        ("127.0.0.1", 9))
+    assert [(e.kind, e.detail) for e in events] == [("reflector_restart", {"epoch": 2})]

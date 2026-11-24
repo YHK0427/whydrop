@@ -32,6 +32,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - On Windows in a language other than English or Korean (for example Japanese), `netsh` was always read as "Wi-Fi disconnected", so Wi-Fi was never watched. The listed BSSID now decides whether Wi-Fi is associated.
 - On Linux, a network name (SSID) containing text such as `freq: 2412` or `signal: -10` replaced the frequency and signal read from `iw`. Each value is now read from its own line only.
 - With two default routes (for example cable and Wi-Fi at once), the agent took the first one listed as the router and interface, not the one with the lowest metric that the system actually uses.
+- Precision mode: one ECHO arriving more than 3 s out of order made the next ECHO look like the end of an outage and recorded a UDP outage with made-up download loss. An ECHO delayed from before a reflector restart was counted as a lost packet although it came back.
+- Precision mode: a canary whose TCP connection opened but whose handshake got no answer within 5 s recorded a "kernel timeout" (the kernel giving up on a connection). It is now a failed connection attempt, retried with the usual backoff.
+- `whydrop nat-test` said "no keepalive advice until the range is closed" also when every delay survived or none did, which more runs can't change. It now says "no keepalive needed below N s" or "keepalive below N s (the shortest delay tried)".
 
 ## [0.1.0] - 2026-11-23
 
