@@ -127,8 +127,8 @@ def test_replay_write_rewrites_stale_verdicts_after_a_backup(tmp_path, capsys):
     ins = ("INSERT INTO incidents (agent_id, start_ms, end_ms, primary_cause, cause_final, tags_json, evidence_json) "
            "VALUES (1, ?, ?, ?, ?, ?, ?)")
     stale = {"label": "Router problem (likely)", "cause": "R1b", "next_step": "Reboot the router", "cause_classes": ["x"]}
-    con.execute(ins, (t0 + 30_000, t0 + 35_000, "R1b", "R1b", json.dumps({"segments": ["lan", "line"], "point": None}),
-                      json.dumps(stale)))
+    con.execute(ins, (t0 + 30_000, t0 + 35_000, "R1b", "R1b", json.dumps({"segments": ["lan"], "point": None}),
+                      json.dumps(stale)))   # an old "router" verdict the current analysis reads as a line drop (seen at home)
     con.execute(ins, (t0 + 31_000, t0 + 33_000, "R3", "R3", json.dumps({"segments": ["dns_router"], "point": None}),
                       json.dumps({"label": "Router DNS failure (likely)", "cause": "R3"})))   # same time, elsewhere
     con.execute(ins, (t0 + 32_000, t0 + 32_000, "R5_reset", "R5_reset", json.dumps({"segments": [], "point": "nat_reset"}),
