@@ -125,7 +125,10 @@ def measure_precision() -> dict[str, float]:
         c = HotCanary(("127.0.0.1", u.port), S, lambda e: None, session_id=1, hb_s=0.1)
         stop = asyncio.Event()
         task = asyncio.create_task(c.run(stop))
-        await asyncio.sleep(1.05)
+        for _ in range(50):   # ≥ 10 answered rounds: a loaded machine answers fewer in a fixed second, and the
+            await asyncio.sleep(0.1)   # handshake and unanswered HBs then land on too few rounds
+            if len(c._rtts) >= 10:
+                break
         stop.set()
         await task
         hb_round = (traffic.BYTES["canary"] - before) / max(1, len(c._rtts))  # an unanswered last HB only overcounts
