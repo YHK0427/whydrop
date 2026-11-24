@@ -74,6 +74,8 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
   const root = h("div", { class: "lanes" });
   const mk = (opts, d) => (box) => { const u = new uPlot({ width: width(box), height: opts.height, cursor, legend: { show: false },
     scales: { x: { time: true } }, ...opts }, d, box); box._chart = u; charts.push(u); };
+  const days = new Set(data.x.map(x => new Date(x * 1000).toDateString())).size > 1;
+  const at = (x) => (days ? new Date(x * 1000).toLocaleDateString(lang, { month: "short", day: "numeric" }) + " " : "") + clock(x * 1000);   // 6 h, 24 h, 7 d tables cross midnight
   const stepWord = stepS === 1 ? t("unit.s", { n: 1 }) : stepS < 60 ? t("unit.s", { n: stepS }) : t("unit.min", { n: stepS / 60 });
 
   const precision = mode === "precision";
@@ -92,7 +94,7 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
       { stroke: css("--down"), fill: css("--down"), paths: bars, points: { show: false } },
       { stroke: css("--ink-3"), fill: css("--ink-3"), paths: bars, points: { show: false } }] },
        [data.x, data.up, data.down, data.unknown]),
-    () => table([t("drops.col.when"), "▲", "▼", "?"], data.x.map((x, i) => [clock(x * 1000), data.up[i], data.down[i] && -data.down[i], data.unknown[i]])));
+    () => table([t("drops.col.when"), "▲", "▼", "?"], data.x.map((x, i) => [at(x), data.up[i], data.down[i] && -data.down[i], data.unknown[i]])));
 
   const p10 = pct(data.rtt, 0.1), p50 = pct(data.rtt, 0.5);
   const latency = lane(t("lane.latency"), baseline === "ready" ? t("lane.latency.sub") : t("lane.latency.learning"), null,
@@ -102,7 +104,7 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
         const { ctx, bbox } = u, y1 = u.valToPos(p50, "y", true), y0 = u.valToPos(p10, "y", true);
         ctx.save(); ctx.fillStyle = css("--rule"); ctx.fillRect(bbox.left, y1, bbox.width, y0 - y1); ctx.restore();
       }] } }, [data.x, data.rtt]),
-    () => table([t("drops.col.when"), "ms"], data.x.map((x, i) => [clock(x * 1000), data.rtt[i]])));
+    () => table([t("drops.col.when"), "ms"], data.x.map((x, i) => [at(x), data.rtt[i]])));
 
   let tcp;
   if (precision) {
@@ -125,7 +127,7 @@ export function lanes(data, { stepS, mode, baseline, events = [] }) {
           resets.forEach(s => ctx.fillText("✕", u.valToPos(s, "x", true) - 4, u.bbox.top + 14));
           ctx.restore();
         }] } }, [data.x, data.tcp]),
-      () => table([t("drops.col.when"), t("lane.tcp")], data.x.map((x, i) => [clock(x * 1000),
+      () => table([t("drops.col.when"), t("lane.tcp")], data.x.map((x, i) => [at(x),
         data.tcp[i] == null ? null : [t("lane.tcp.stall"), t("lane.tcp.retrans"), t("state.ok")][data.tcp[i]]])));
   } else {
     tcp = h("section", { class: "lane" }, h("div", { class: "lane-head" }, h("h3", {}, t("lane.tcp"))),

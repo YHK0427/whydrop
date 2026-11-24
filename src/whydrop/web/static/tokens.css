@@ -32,10 +32,11 @@
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--page); color: var(--ink); font: 400 15px/1.55 var(--font);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: tabular-nums; overflow-wrap: break-word;   /* a long token in a server text wraps, never scrolls the page */
 }
 a { color: inherit; }
 button, select, input { font: inherit; color: inherit; }
+select { max-width: 100%; }   /* an option as long as a cause label */
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sr:focus { position: static; width: auto; height: auto; clip: auto; padding: var(--s2) var(--s4); display: inline-block; }
@@ -75,6 +76,7 @@ h3 { font-size: 15px; font-weight: 600; }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 .row { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s6); }
+.split > * { min-width: 0; }   /* a grid column otherwise grows to its longest unbroken word */
 .banner { padding: var(--s3) var(--s4); border-left: 3px solid var(--warn); background: var(--surface); margin: var(--s3) 0; }
 .banner.bad { border-left-color: var(--critical); }
 .banner.static { max-width: 1168px; margin: var(--s3) auto; }
@@ -153,8 +155,9 @@ ul.drops a:hover .what { text-decoration: underline; }
 .when { color: var(--ink-2); margin-top: var(--s1); }
 .protocol { font-family: var(--font); max-width: 75ch; }
 .protocol code { font-family: var(--mono); font-size: 13px; }
-dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: var(--s1) var(--s4); margin: 0; }
+dl.kv { display: grid; grid-template-columns: fit-content(40%) minmax(0, 1fr); gap: var(--s1) var(--s4); margin: 0; }
 dl.kv dt { color: var(--ink-2); } dl.kv dd { margin: 0; }
+dl.kv dt, dl.kv dd, table.data td { overflow-wrap: anywhere; }   /* grids and tables size to min-content: let it shrink */
 .hex { font-family: var(--mono); font-size: 13px; white-space: pre-wrap; background: var(--surface); border: 1px solid var(--rule);
   padding: var(--s3); }
 .hex .f { padding: 1px 2px; border-radius: 3px; }

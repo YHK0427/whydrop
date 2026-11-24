@@ -78,6 +78,7 @@ async function render() {
   const app = document.getElementById("app");
   const head = document.getElementById("head");
   head.replaceChildren(topBar(route.nav));
+  document.querySelector("a.sr").textContent = t("top.skip");   // index.html's text is English
   const mod = await route.page();
   if (mine !== generation) return;          // the user navigated again while the page loaded: leave theirs alone
   const main = h("main", { id: "main", tabindex: "-1" });

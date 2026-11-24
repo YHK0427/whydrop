@@ -16,7 +16,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.
 - The Korean dashboard and summary showed the *In protocol terms* paragraph and evidence values (upload, download) in English. New drops store the paragraph in both languages; drops recorded before keep the English one.
 - The public demo's protocol page said packets appear once precision mode is on, with a pause button and an empty table. It now says the demo has no packets and links the protocol document.
-- NAT chart: the UDP label could sit on the TCP line.
+- NAT chart: the UDP label could sit on the TCP line. On a phone its text was about 7 px; it is now drawn at the phone's width, with full-size text.
+- Dashboard errors: with the agent stopped every screen said "Couldn't load data (server returned ?)"; it now says the agent can't be reached. A server error no longer prints the raw API address with its query twice, and the protocol page shows the error instead of "no packets yet".
+- A long unbroken word in a cause, next step or evidence value (a hostname, a hash) pushed the drops table, the cause filter, the drop page and the Now page's lists past the screen edge. It now wraps.
+- The chart tables of the 6 h, 24 h and 7 d views now show the date when they cross midnight; the same clock time on two days looked identical.
+- The public Now page with no drops yet said to press a test button it doesn't have. The skip link said "Skip to content" on the Korean page, and the Korean token message broke "?token=" across lines.
 - Korean text wrapped inside words (for example "(추 / 정)"), and table headers stacked on a phone.
 - `[nat] enable_7500 = true` was read but ignored: `whydrop nat-test` and the dashboard's NAT test now include the 7500 s TCP delay when it is set.
 - Alert titles now name the agent (`agent_name`, `WHYDROP_AGENT_NAME`), as the example config said they did. Compose passes `WHYDROP_AGENT_NAME` through.
