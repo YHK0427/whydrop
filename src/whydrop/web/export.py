@@ -28,6 +28,13 @@ def table_rows(db, name: str, from_ms: int, to_ms: int) -> list[dict]:
     return Q.ranged(db, TABLES[name], from_ms, to_ms, limit=1_000_000)
 
 
+def _cell(v):
+    """A CSV cell: tables as JSON, and text a spreadsheet would run as a formula made literal."""
+    if isinstance(v, (dict, list)):
+        v = json.dumps(v, ensure_ascii=False)
+    return "'" + v if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", chr(9), chr(13)) else v
+
+
 def render(name: str, rows: list[dict], fmt: str, pub: bool, now_ms: int) -> tuple[str, str]:
     rows = [{k: v for k, v in r.items() if k != "agent_id"} for r in rows]   # internal column
     if pub:
@@ -39,7 +46,7 @@ def render(name: str, rows: list[dict], fmt: str, pub: bool, now_ms: int) -> tup
     w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
     w.writeheader()
     for r in rows:
-        w.writerow({k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for k, v in r.items()})
+        w.writerow({k: _cell(v) for k, v in r.items()})
     return buf.getvalue(), "text/csv; charset=utf-8"
 
 
@@ -127,7 +134,7 @@ def stream(db, name: str, from_ms: int, to_ms: int, fmt: str, pub: bool, now_ms:
                     chunk.append(buf.getvalue())
                 buf = io.StringIO()
                 csv.DictWriter(buf, fieldnames=hdr, extrasaction="ignore").writerow(
-                    {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v for k, v in r.items()})
+                    {k: _cell(v) for k, v in r.items()})
                 chunk.append(buf.getvalue())
             first = False
             if len(chunk) >= 1000:   # one thread hop per ~1000 rows, not per row

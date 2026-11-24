@@ -26,6 +26,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
 - The analysis kept only the later part of a second written in two parts, so a loss in the first part could vanish from the verdict.
 - The dashboard API answered times or drop ids past 2^63 (or negative times) with a 500; they are now a 400.
+- CSV exports: text starting with `=`, `+`, `-` or `@` is prefixed with `'` so a spreadsheet shows it instead of running it as a formula.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
 - On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
