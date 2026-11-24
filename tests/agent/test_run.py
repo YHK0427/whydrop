@@ -370,7 +370,7 @@ def test_incident_rows_written_live_and_replay_matches(fakes, monkeypatch, tmp_p
     async def line_hb(slot, now_ms, **k):
         t = now_ms()
         t0.setdefault("t", t)
-        ok = not (3000 <= t - t0["t"] < 9000)
+        ok = not (3000 <= t - t0["t"] < 15000)   # 12 s: clear of the 10 s lossy-period gate and probe timing on a slow runner
         return Result("line_hb", f"line_hb:{slot.provider}", slot.provider, t, ok, 5.0 if ok else None)
     monkeypatch.setattr(runmod.line_hb, "probe", line_hb)
     async def no_link():
