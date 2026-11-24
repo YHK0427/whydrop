@@ -74,6 +74,13 @@ def summary(changes) -> list[dict]:
 
 
 SLACK_MS = 2000   # a replayed incident may start or end a second or two off the stored one
+PATH = {"host_net", "wifi", "link", "lan", "line"}
+
+
+def _same_place(a: set, b: set) -> bool:
+    """Path segments may be re-placed by a newer analysis (a 'router' drop read as in-home queueing on the line); a
+    DNS drop is only ever the same as a DNS drop."""
+    return bool(a & b) or bool(a & PATH and b & PATH)
 
 
 def rewrite(db: Path, backup: Path) -> list[dict]:
@@ -102,7 +109,7 @@ def rewrite(db: Path, backup: Path) -> list[dict]:
             segs = set(tags.get("segments") or [])
             m = [f for f in finals if not f.incident.point and f.incident.start_ms <= end + SLACK_MS
                  and (f.incident.end_ms or f.incident.start_ms) >= start - SLACK_MS
-                 and f.incident.segments & segs]   # the same drop: overlapping in time *and* in where it broke
+                 and _same_place(f.incident.segments, segs)]   # the same drop: overlapping in time and in kind
             if len(m) != 1:
                 out.append({**row, "status": "not a drop now" if not m else f"ambiguous ({len(m)})"})
                 continue
