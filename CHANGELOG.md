@@ -4,6 +4,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- `whydrop replay --write`: after an upgrade, store the current analysis's verdict on past drops (backup first; point events and drops without 1-second data are left alone).
+
 ### Fixed
 - The 6 h, 24 h and 7 d charts were empty for the first 7 days: 1-minute aggregates were only made from 1-second rows older than 7 days. They are now made as data comes in, 5 minutes behind, and the long views read them together with the latest 1-second rows, counting each second once.
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.
@@ -17,7 +20,21 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `whydrop replay --set STREAM_LOSS_S=…` had no effect (the 2 s was hard-coded); the unused `TIMEOUT_S` is gone, and three thresholds that lived outside `constants.py` (`LOSS_MIN_SENDS`, `WEAK_MIN_SAMPLES`, `ROAM_LOSS_WINDOW_S`) can now be set too.
 - `[intervals] link` was accepted and ignored (the link check runs every second by design); it is now rejected as an unknown key.
 - Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
+- The config now refuses values that parsed but misbehaved: `udp_stream.pps` outside 1–100 and intervals outside 0.5–3600 s (which could hammer the router or public servers), a `notify.format` typo (alerts silently went out as JSON), non-http(s) alert URLs, target or `web.bind` ports outside 1–65535, a negative `storage.min_free_mb` and an `agent_name` over 64 characters.
+- An empty host, port 0 or an IPv6 address in `reflector` now turns precision mode off with the reason, as `host:abc` already did, instead of starting precision mode against an address it can't use (the sockets are IPv4).
+- Alerts: at most 12 delivered an hour, retries included (the next one says how many were held), at most 100 waiting for retry, and a retry that fails again is saved with its backoff so a restart doesn't start the backoff over.
+- A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
+- The analysis kept only the later part of a second written in two parts, so a loss in the first part could vanish from the verdict.
+- The dashboard API answered times or drop ids past 2^63 (or negative times) with a 500; they are now a 400.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
+- The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
+- On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
+- On Windows in a language other than English or Korean (for example Japanese), `netsh` was always read as "Wi-Fi disconnected", so Wi-Fi was never watched. The listed BSSID now decides whether Wi-Fi is associated.
+- On Linux, a network name (SSID) containing text such as `freq: 2412` or `signal: -10` replaced the frequency and signal read from `iw`. Each value is now read from its own line only.
+- With two default routes (for example cable and Wi-Fi at once), the agent took the first one listed as the router and interface, not the one with the lowest metric that the system actually uses.
+- Precision mode: one ECHO arriving more than 3 s out of order made the next ECHO look like the end of an outage and recorded a UDP outage with made-up download loss. An ECHO delayed from before a reflector restart was counted as a lost packet although it came back.
+- Precision mode: a canary whose TCP connection opened but whose handshake got no answer within 5 s recorded a "kernel timeout" (the kernel giving up on a connection). It is now a failed connection attempt, retried with the usual backoff.
+- `whydrop nat-test` said "no keepalive advice until the range is closed" also when every delay survived or none did, which more runs can't change. It now says "no keepalive needed below N s" or "keepalive below N s (the shortest delay tried)".
 
 ## [0.1.0] - 2026-11-23
 

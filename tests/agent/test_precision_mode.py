@@ -1,6 +1,8 @@
 import asyncio
 from collections import Counter
 
+import pytest
+
 from whydrop.agent import run as runmod
 from whydrop.agent.config import load_config
 from whydrop.agent.precision import precision_enabled, reflector_addr
@@ -80,3 +82,11 @@ def test_line_hb_half_rate_only_with_open_gateway_port(monkeypatch, tmp_path):
 def test_bad_reflector_value_is_a_reason():
     cfg = load_config(None, {"WHYDROP_REFLECTOR": "host:abc"})
     assert precision_enabled(cfg, SECRET) == (False, "reflector must be host or host:port")
+
+
+@pytest.mark.parametrize("v", [":48100", "a b", "r.example:0", "[2001:db8::1]:48100", "2001:db8::1"])
+def test_other_unusable_reflector_values_turn_precision_off_with_the_reason(v):
+    """These passed the check (port 0, an empty host, IPv6 on AF_INET sockets); basic mode keeps running."""
+    cfg = load_config(None, {"WHYDROP_REFLECTOR": v})
+    assert precision_enabled(cfg, SECRET) == (False, "reflector must be host or host:port")
+

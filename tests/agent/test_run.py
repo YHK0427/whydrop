@@ -498,3 +498,20 @@ def test_config_enable_7500_reaches_the_dashboard_run(fakes, monkeypatch):
         with pytest.raises(Stop):
             asyncio.run(agent._run_nat())
         assert (seen["tcp"][-1] == 7500) is enabled
+
+
+def test_no_secret_or_url_token_ever_reaches_the_log(fakes, monkeypatch, tmp_path, caplog):
+    """L2 audit: the reflector secret, the dashboard token and a token inside the webhook URL, through a run that
+    fails every way it can (wrong secret at the reflector, an alert endpoint that refuses)."""
+    import logging
+    from dataclasses import replace
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(runmod, "PRECISION_EVERY_S", 0.3)
+    ui = "uiTok_" + "u" * 20
+    monkeypatch.setenv("WHYDROP_UI_TOKEN", ui)
+    hook = "http://127.0.0.1:9/hook?auth=hookTok_" + "h" * 20
+    cfg = replace(precision_cfg(tmp_path, monkeypatch), notify={"webhook_url": hook, "kuma_push_url": hook})
+    run_with(cfg, 2.0, reflector_secret="z" * 40)
+    text = caplog.text + "".join(str(r.args) for r in caplog.records)
+    assert "finding: secret_mismatch" in caplog.text                      # the failing path really ran
+    assert SECRET not in text and "z" * 40 not in text and ui not in text and "hookTok_" not in text

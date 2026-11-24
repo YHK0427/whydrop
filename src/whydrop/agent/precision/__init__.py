@@ -16,10 +16,10 @@ def precision_enabled(cfg, env: Mapping[str, str]) -> tuple[bool, str | None]:
     except SecretError as e:
         return False, str(e)
     try:
-        host, _ = reflector_addr(cfg)
+        host, port = reflector_addr(cfg)
     except ValueError:
         return False, "reflector must be host or host:port"
-    if not host:
+    if not host or any(ch in host for ch in " []/:") or not 0 < port < 65536:   # IPv4 or a name: the sockets are AF_INET
         return False, "reflector must be host or host:port"
     return True, None
 

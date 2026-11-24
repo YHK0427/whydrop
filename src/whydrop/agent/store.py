@@ -159,34 +159,36 @@ class Store:
             raise
 
     async def late(self, ts_ms: int, probe: str, pair: str) -> None:
-        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)), None)
+        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)
+                  and x.lost > 0), None)   # a late reply turns a loss into "late": find the part of the second that has it
         if r is not None:
             r.late += 1
-            r.lost = max(0, r.lost - 1)
+            r.lost -= 1
             return
         for fn in self.late_listeners:
             fn(ts_ms, probe, pair, None)
 
         def upd():
             with self._con:
-                self._con.execute("UPDATE samples_1s SET late = late + 1, lost = MAX(0, lost - 1) "
-                                  "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=?",
+                self._con.execute("UPDATE samples_1s SET late = late + 1, lost = lost - 1 "
+                                  "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=? AND lost > 0",
                                   (self.agent_id, ts_ms, probe, pair))
         await self._db(upd)
 
     async def late_dir(self, ts_ms: int, probe: str, pair: str, direction: str) -> None:
         """A late reply for a send already counted as lost in `direction` (up | down | unknown)."""
         col = {"up": "lost_up", "down": "lost_down"}.get(direction, "lost_dir_unknown")
-        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)), None)
+        r = next((x for x in reversed(self._samples) if (x.ts_ms, x.probe, x.pair) == (ts_ms, probe, pair)
+                  and x.lost > 0), None)   # else it's in the DB, or a duplicate (the UPDATE needs lost > 0 too)
         if r is not None:
             r.late += 1
-            r.lost = max(0, r.lost - 1)
+            r.lost -= 1
             setattr(r, col, max(0, getattr(r, col) - 1))
             return
         for fn in self.late_listeners:
             fn(ts_ms, probe, pair, direction)
-        await self.execute(f"UPDATE samples_1s SET late = late + 1, lost = MAX(0, lost - 1), {col} = MAX(0, {col} - 1) "
-                           "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=?", (self.agent_id, ts_ms, probe, pair))
+        await self.execute(f"UPDATE samples_1s SET late = late + 1, lost = lost - 1, {col} = MAX(0, {col} - 1) "
+                           "WHERE agent_id=? AND ts_ms=? AND probe=? AND pair=? AND lost > 0", (self.agent_id, ts_ms, probe, pair))
 
     async def insert(self, table: str, **cols) -> int:
         if table not in _INSERTABLE or not all(c.isidentifier() for c in cols):

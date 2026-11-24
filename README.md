@@ -84,9 +84,9 @@ The dashboard needs a token when it listens beyond localhost. `?public=1` switch
 
 ## Alerts and export
 
-- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h. Bodies use the public view; `notify.lang = "ko"` sends them in the dashboard's Korean, and titles name the agent (`agent_name`).
+- Webhooks (`notify.webhook_url`, format `json`, `ntfy` or `discord`) fire **when a drop is finalized**, 80 s after it ends (120 s when Wi-Fi, the cable or the router was down) — nothing can be sent through a dead line anyway. Failed deliveries are retried for 24 h (up to 100 waiting). At most 12 alerts an hour: when a flapping line finalizes more, the next alert says how many were held. Bodies use the public view; `notify.lang = "ko"` sends them in the dashboard's Korean, and titles name the agent (`agent_name`).
 - Optional Uptime Kuma push heartbeat (`notify.kuma_push_url`).
-- Exports: drops, rough patches, events and minute aggregates as CSV or JSON; a per-drop bug report (public view, ±10 min); `whydrop replay` re-runs the analysis over a recorded database; `whydrop export-static` writes a read-only public demo of the dashboard.
+- Exports: drops, rough patches, events and minute aggregates as CSV or JSON; a per-drop bug report (public view, ±10 min); `whydrop replay` re-runs the analysis over a recorded database (`--write` updates past verdicts after an upgrade, with a backup first); `whydrop export-static` writes a read-only public demo of the dashboard.
 
 ## Tools that work alongside
 
@@ -125,7 +125,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 |---|---|---|---|
 | Linux (Docker, host network) | ✓ | ✓ | ✓ (`iw`) |
 | Linux (from source: `pip install '.[web]'`) | ✓ | ✓ | ✓ |
-| Windows (native, from source) | ✓ | ✓ (no `TCP_INFO`) | ✓ (`netsh`, English or Korean) |
+| Windows (native, from source) | ✓ | ✓ (no `TCP_INFO`) | ✓ (`netsh`, English or Korean; other languages: associated or not, and which AP) |
 | Docker Desktop / WSL | refused on purpose | — | — |
 | Raspberry Pi and other arm64 / armv7 | images are built and smoke-tested under emulation on release; not yet tried on hardware | | |
 

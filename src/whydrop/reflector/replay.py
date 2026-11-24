@@ -69,7 +69,7 @@ class Tombstones:
         try:
             raw = json.loads(self._path.read_text(encoding="utf-8"))
             self._t = {int(k): [int(v[0]), float(v[1])] for k, v in raw["t"].items() if math.isfinite(float(v[1]))}
-        except (ValueError, KeyError, TypeError, IndexError, AttributeError) as e:
+        except (ValueError, KeyError, TypeError, IndexError, AttributeError, OverflowError, RecursionError) as e:
             log.warning("tombstone file %s unreadable (%s); starting empty, replays inside the gap may be answered once", self._path, e)
             self._t = {}
         self._prune()

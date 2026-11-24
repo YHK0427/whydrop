@@ -138,3 +138,86 @@ def test_alert_title_header_survives_a_name_with_a_newline():
     _, headers = payload(ROW, "ntfy", ROW["end_ms"], name="a\r\nX-Evil: 1")
     assert "\n" not in headers["Title"] and "\r" not in headers["Title"]
 
+
+
+def test_a_failed_retry_is_persisted_with_its_backoff():
+    """A retry that failed again changed tries/next_ms but wasn't saved: after a restart the backoff started over."""
+    saved = []
+    sink = Sink(fail=99)
+    now = [ROW["end_ms"]]
+    n = Notifier({"webhook_url": sink.url}, now_ms=lambda: now[0], on_queue=lambda q: saved.append(json.dumps(q)))
+
+    async def go():
+        await n.handle(finalized())
+        now[0] += 60_000
+        await n.retry()
+    asyncio.run(go())
+    sink.close()
+    assert json.loads(saved[-1])[0]["tries"] == 2
+
+
+def test_the_retry_queue_is_bounded():
+    now = [ROW["end_ms"]]
+    n = Notifier({"webhook_url": "http://127.0.0.1:9/x"}, now_ms=lambda: now[0])
+
+    async def fail(row):
+        return False
+    n._send = fail
+    for i in range(150):
+        asyncio.run(n.handle(finalized({**ROW, "id": i})))
+        now[0] += 301_000                                               # under the hourly cap
+    assert len(n.queue) == 100 and n.queue[0]["row"]["id"] == 50      # the newest 100 are kept
+
+
+def test_a_storm_of_drops_is_capped_and_the_next_alert_says_how_many_were_held():
+    """A flapping line finalized dozens of drops an hour, each one a phone notification."""
+    sink = Sink()
+    now = [ROW["end_ms"]]
+    n = Notifier({"webhook_url": sink.url, "format": "ntfy"}, now_ms=lambda: now[0])
+
+    async def go():
+        for i in range(20):
+            await n.handle(finalized({**ROW, "id": i}))
+            now[0] += 60_000
+        now[0] += 3600_000
+        await n.handle(finalized({**ROW, "id": 99}))
+    asyncio.run(go())
+    sink.close()
+    assert len(sink.got) == 13
+    assert sink.got[-1][1].endswith("(+8 more drops not alerted; see the dashboard)")
+    assert "more drops" not in sink.got[-2][1]
+
+
+def test_a_failing_webhook_logs_no_part_of_its_url(caplog):
+    import logging
+    caplog.set_level(logging.DEBUG)
+    sink = Sink(fail=99)
+    url = sink.url + "?auth=hookTok_" + "h" * 20
+    n = Notifier({"webhook_url": url, "kuma_push_url": url}, now_ms=lambda: ROW["end_ms"])
+    asyncio.run(n.handle(finalized()))
+    asyncio.run(n.kuma_push())
+    sink.close()
+    assert "not delivered" in caplog.text and "hookTok_" not in caplog.text and "127.0.0.1" not in caplog.text
+
+
+def test_a_recovered_endpoint_gets_the_backlog_at_the_hourly_pace_and_failures_dont_use_up_the_hour():
+    """Review: retries skipped the cap (8 h of queued alerts went out at once), and failed sends counted toward it
+    (drops were 'held' while the queue had room)."""
+    sink = Sink(fail=10**6)
+    now = [ROW["end_ms"]]
+    n = Notifier({"webhook_url": sink.url}, now_ms=lambda: now[0])
+
+    async def go():
+        for i in range(40):                                  # 40 drops while the endpoint is down
+            await n.handle(finalized({**ROW, "id": i}))
+            now[0] += 60_000
+        assert len(n.queue) == 40 and n.held == 0          # all queued for retry, none held
+        sink.fail = 0
+        now[0] += 3600_000
+        await n.retry()
+        assert len(sink.got) == 12                           # one hour's worth
+        now[0] += 3600_000
+        await n.retry()
+        assert len(sink.got) == 24
+    asyncio.run(go())
+    sink.close()

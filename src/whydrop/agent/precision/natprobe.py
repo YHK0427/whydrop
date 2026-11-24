@@ -211,9 +211,10 @@ def format_report(rep: NatReport) -> str:
         for r in rows:
             state = {True: "alive", False: "forgotten", None: "inconclusive"}[r.alive]
             lines.append(f"  {r.delay_s:>5} s  {state}" + (f" ({r.detail['reason']})" if r.detail.get("reason") else ""))
-        k = rep.keepalive_s[proto.lower()]
-        lines.append(f"  timeout {_range_text(rng)}; " +
-                     (f"keepalive {k} s or less" if k else "no keepalive advice until the range is closed"))
+        k, (lo, hi) = rep.keepalive_s[proto.lower()], rng
+        advice = f"keepalive {k} s or less" if k else f"keepalive below {hi} s (the shortest delay tried)" if hi \
+            else f"no keepalive needed below {lo} s" if lo else "no keepalive advice"
+        lines.append(f"  timeout {_range_text(rng)}; {advice}")
     return "\n".join(lines)
 
 

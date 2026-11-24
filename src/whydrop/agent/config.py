@@ -97,6 +97,8 @@ def _targets(items: list) -> tuple[Target, ...]:
             raise ConfigError(f"targets[{i}] needs addr, port, kind, provider ({e})") from None
         if out[-1].kind not in ("dns", "stun", "tcp443") or out[-1].proto not in ("udp", "tcp"):
             raise ConfigError(f"targets[{i}]: bad kind or proto")
+        if not 0 < out[-1].port < 65536:
+            raise ConfigError(f"targets[{i}].port must be 1–65535")
     return tuple(out)
 
 
@@ -116,9 +118,30 @@ def load_config(path: Path | None, env: Mapping[str, str]) -> Config:
         raise ConfigError(f"bad config value: {e}") from None
     if not 30 <= c.canary_idle_interval_s <= 7500:
         raise ConfigError("canary.idle_interval_s must be 30–7500")
-    if c.udp_stream_pps <= 0 or any(v <= 0 for v in c.intervals.values()):
-        raise ConfigError("intervals and udp_stream.pps must be > 0")
+    _check_limits(c)
     return c
+
+
+def _check_limits(c: "Config") -> None:
+    """Values that parse but would misbehave: hammer the router or public servers, or alert nowhere silently."""
+    if not 1 <= c.udp_stream_pps <= 100:
+        raise ConfigError("udp_stream.pps must be 1–100")
+    for k, v in c.intervals.items():
+        if not 0.5 <= v <= 3600:
+            raise ConfigError(f"intervals.{k} must be 0.5–3600 s")
+    port = c.web.bind.rpartition(":")[2]   # an empty host ("8790", ":8790") has always meant 127.0.0.1
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise ConfigError(f"web.bind must be host:port, got {c.web.bind!r}")
+    if len(c.agent_name) > 64:
+        raise ConfigError("agent_name must be at most 64 characters")
+    if c.storage_min_free_mb is not None and c.storage_min_free_mb < 0:
+        raise ConfigError("storage.min_free_mb must be ≥ 0")
+    n = c.notify
+    if n.get("format", "json") not in ("json", "ntfy", "discord"):
+        raise ConfigError('notify.format must be "json", "ntfy" or "discord"')
+    for key in ("webhook_url", "kuma_push_url"):
+        if n.get(key) and not str(n[key]).startswith(("http://", "https://")):
+            raise ConfigError(f"notify.{key} must be an http:// or https:// URL")
 
 
 def _str_list(v, key: str) -> tuple[str, ...]:

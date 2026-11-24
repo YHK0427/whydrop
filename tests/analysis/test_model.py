@@ -112,3 +112,15 @@ def test_every_analysis_constant_is_used():
     src = "\n".join(p.read_text(encoding="utf-8") for p in Path(K.__file__).parent.glob("*.py") if p.name != "constants.py")
     names = [n for n, v in vars(K).items() if n.isupper() and isinstance(v, (int, float))]
     assert names and [n for n in names if not re.search(rf"\bK\.{n}\b", src)] == []
+
+
+def test_a_second_written_in_two_parts_is_summed_like_the_store_does():
+    """Review: add_rows kept only the later part, so a loss written first vanished from the analysis."""
+    from whydrop.agent.store import SampleRow
+    fb = FrameBuilder(finalize_lag_ms=0)
+    fb.add_rows([SampleRow(T0, "udp_stream", "reflector", 5, 4, 1, lost_up=1, rtt_min=10.0, rtt_avg=10.0, rtt_max=10.0)])
+    fb.add_rows([SampleRow(T0, "udp_stream", "reflector", 5, 5, 0, rtt_min=20.0, rtt_avg=20.0, rtt_max=30.0)])
+    [f] = fb.ready(T0 + 1000)
+    r = f.samples[("udp_stream", "reflector")]
+    assert (r.sent, r.ok, r.lost, r.lost_up, r.rtt_min, r.rtt_max) == (10, 9, 1, 1, 10.0, 30.0)
+    assert abs(r.rtt_avg - (10.0 * 4 + 20.0 * 5) / 9) < 1e-9

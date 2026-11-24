@@ -1,5 +1,8 @@
 import random
 
+import pytest
+
+from whydrop.proto.mac import hmac8
 from whydrop.proto.wd import WdPacket, WdType, decode, encode
 from whydrop.reflector.replay import Tombstones
 from whydrop.reflector.udp import UdpReflector
@@ -63,9 +66,10 @@ def test_duplicate_no_reply():
     assert r.handle(probe(1, 1), A) == [] and r.drops["replay"] == 1
 
 
-def test_inbound_echo_type_dropped():  # a valid ECHO sent back to us must not reflect
+@pytest.mark.parametrize("t", [WdType.ECHO, WdType.NAT_REPLY])
+def test_inbound_reply_types_dropped(t):  # a valid reply sent back to us must not reflect
     r = mk()
-    assert r.handle(encode(WdPacket(WdType.ECHO, 1, 1, 0), S), A) == [] and r.drops["bad_type"] == 1
+    assert r.handle(encode(WdPacket(t, 1, 1, 0), S), A) == [] and r.drops["bad_type"] == 1
 
 
 def test_bad_hmac_no_reply():
@@ -75,8 +79,11 @@ def test_bad_hmac_no_reply():
 
 
 def test_reply_never_larger():
-    r = mk()
-    assert all(len(x) <= 44 for x in r.handle(probe(1, 1), A) + r.handle(natreq(2, 1, 10), A))
+    r, clk = mk_clock()
+    out = r.handle(probe(1, 1), A) + r.handle(natreq(2, 1, 10), A)
+    clk.t += 10
+    out += [pkt for _, pkt in r.due()]
+    assert len(out) == 3 and all(len(x) <= 44 for x in out)  # ECHO, immediate and delayed NAT_REPLY
 
 
 def test_nat_immediate_then_delayed():
@@ -137,6 +144,28 @@ def test_fuzz_never_replies_or_raises():
     for _ in range(1000):
         assert r.handle(rnd.randbytes(rnd.randrange(0, 1500)), (f"192.0.2.{rnd.randrange(1, 255)}", 9)) == []
     assert sum(r.drops.values()) == 1000
+
+
+def test_fuzz_header_valid_bodies():  # random bodies past precheck, with a wrong and with a correct MAC
+    r, clk = mk_clock()
+    rnd = random.Random(2)
+    for i in range(3000):
+        body = b"WD\x01" + bytes([rnd.choice((1, 3))]) + rnd.randbytes(32)
+        mac = hmac8(S, body) if i % 2 else rnd.randbytes(8)
+        clk.t += 0.05  # stay under the post-MAC rate so valid packets reach the session code
+        assert all(len(x) == 44 for x in r.handle(body + mac, (f"192.0.2.{i % 250}", 9)))
+    assert r.drops["bad_hmac"] == 1500
+
+
+def test_many_source_ips_memory_bounded():  # spoofed sources must not grow the per-IP buckets without limit
+    r = mk()
+    assert r._pre._max == r._post._max == 65_536  # about 20 MB at the cap
+    r._pre._max = r._post._max = 100  # same eviction path, 100x fewer packets
+    junk = encode(P, b"z" * 32)
+    for i in range(5000):
+        r.handle(junk, (f"2001:db8::{i:x}", 9))  # documentation prefix
+    assert len(r._pre.buckets) == 100 and len(r._post.buckets) == 0 and len(r.sessions) == 0
+    assert len(r.handle(probe(1, 1), ("2001:db8::ffff", 9))) == 1  # a fresh source is still served
 
 
 def test_session_idle_sweep():

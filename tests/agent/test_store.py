@@ -120,16 +120,16 @@ def test_same_second_written_twice_is_merged(tmp_path):
     async def main():
         s = Store(tmp_path / "w.db")
         await s.open()
-        await s.add_samples([SampleRow(1000, "dns", "p", sent=2, ok=2, lost=0, rtt_min=10.0, rtt_avg=10.0, rtt_max=10.0)])
+        await s.add_samples([SampleRow(1000, "dns", "p", sent=3, ok=2, lost=1, rtt_min=10.0, rtt_avg=10.0, rtt_max=10.0)])
         await s.flush()
-        await s.late(1000, "dns", "p")
         await s.add_samples([SampleRow(1000, "dns", "p", sent=1, ok=1, lost=0, rtt_min=40.0, rtt_avg=40.0, rtt_max=40.0)])
+        await s.late(1000, "dns", "p")     # the lost send is in the written part, not the buffered one
         await s.close()
     run(main())
     con = sqlite3.connect(tmp_path / "w.db")
-    row = con.execute("select sent, ok, late, rtt_min, rtt_avg, rtt_max from samples_1s").fetchone()
+    row = con.execute("select sent, ok, lost, late, rtt_min, rtt_avg, rtt_max from samples_1s").fetchone()
     con.close()
-    assert row == (3, 3, 1, 10.0, 20.0, 40.0)
+    assert row == (4, 3, 0, 1, 10.0, 20.0, 40.0)
 
 
 def test_failed_flush_keeps_the_batch(tmp_path, monkeypatch):
@@ -186,3 +186,27 @@ def test_late_dir_adjusts_direction_column(tmp_path):
     con = sqlite3.connect(tmp_path / "w.db")
     assert con.execute("select lost, lost_up, lost_down, late from samples_1s").fetchone() == (1, 1, 0, 1)
     con.close()
+
+
+def test_late_replies_on_buffered_rows_missing_rows_and_rows_already_at_zero(tmp_path):
+    """L2 audit: a late direction-known reply on a row still in memory, the analysis listener, a late reply for a
+    second that was never written, and more late replies than losses (late never exceeds what was lost)."""
+    heard = []
+
+    async def main():
+        s = Store(tmp_path / "w.db")
+        await s.open()
+        s.late_listeners.append(lambda *a: heard.append(a))
+        await s.add_samples([SampleRow(1000, "udp_stream", "reflector", sent=10, ok=8, lost=2, lost_up=2)])
+        await s.late_dir(1000, "udp_stream", "reflector", "up")           # still buffered: memory, no listener
+        await s.flush()
+        await s.late_dir(1000, "udp_stream", "reflector", "up")           # written: the DB, and the analysis hears
+        await s.late_dir(1000, "udp_stream", "reflector", "up")           # a third (a duplicate): no loss left to turn
+        await s.late(5000, "dns", "nothing:1/udp")                        # no such row: nothing breaks
+        await s.close()
+    run(main())
+    con = sqlite3.connect(tmp_path / "w.db")
+    assert con.execute("select lost, lost_up, late from samples_1s where ts_ms = 1000").fetchone() == (0, 0, 2)
+    assert con.execute("select count(*) from samples_1s").fetchone()[0] == 1
+    con.close()
+    assert heard[0] == (1000, "udp_stream", "reflector", "up") and len(heard) == 3

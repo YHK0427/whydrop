@@ -107,3 +107,32 @@ def test_every_interval_key_is_read():
     used = set(re.findall(r'(?:iv|intervals)\[\s*"([a-z_]+)"', run)) | {"wifi"}   # wifi vs wifi_windows: picked by platform
     assert set(config.DEFAULT_INTERVALS) == used
 
+
+
+@pytest.mark.parametrize("toml,key", [
+    ('[[targets]]\naddr="1.1.1.1"\nport=70000\nkind="dns"\nprovider="x"\n', "port"),
+    ('[[targets]]\naddr="1.1.1.1"\nport=0\nkind="dns"\nprovider="x"\n', "port"),
+    ('[notify]\nwebhook_url="https://x.example"\nformat="ntfyy"\n', "notify.format"),
+    ('[notify]\nwebhook_url="file:///etc/passwd"\n', "notify.webhook_url"),
+    ('[notify]\nkuma_push_url="ftp://x.example"\n', "notify.kuma_push_url"),
+    ('[web]\nbind="nonsense"\n', "web.bind"),
+    ('[web]\nbind="127.0.0.1:99999"\n', "web.bind"),
+    ('[udp_stream]\npps=100000\n', "udp_stream.pps"),
+    ('[intervals]\ngateway=0.001\n', "intervals"),
+    ('agent_name="' + "a" * 65 + '"\n', "agent_name"),
+    ('[storage]\nmin_free_mb=-5\n', "storage.min_free_mb"),
+])
+def test_values_that_would_misbehave_are_refused_by_name(tmp_path, toml, key):
+    """L2 audit: all of these were accepted. pps 100000 or a 1 ms interval would hammer the router and public
+    servers; a format typo silently sent JSON; a file:// webhook was taken as is."""
+    p = tmp_path / "w.toml"
+    p.write_text(toml)
+    with pytest.raises(ConfigError, match=key.replace(".", r"\.")):
+        load_config(p, {})
+
+
+def test_web_bind_from_the_environment_is_checked_too():
+    with pytest.raises(ConfigError, match=r"web\.bind"):
+        load_config(None, {"WHYDROP_WEB_BIND": "127.0.0.1:http"})
+    assert load_config(None, {"WHYDROP_WEB_BIND": ":8790"}).web.bind == ":8790"   # worked before: still does
+    assert load_config(None, {"WHYDROP_WEB_BIND": "0.0.0.0:8790"}).web.bind == "0.0.0.0:8790"

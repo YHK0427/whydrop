@@ -8,24 +8,30 @@ import sys
 from whydrop.agent.proc import run_cmd
 from whydrop.agent.results import Result
 
-_WIN_DEFAULT = re.compile(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)", re.M)
+_WIN_DEFAULT = re.compile(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+)", re.M)
 
 
 def parse_linux_route(text: str) -> tuple[str | None, str | None]:
-    """/proc/net/route → (gateway or None for point-to-point, interface) of the default route."""
+    """/proc/net/route → (gateway or None for point-to-point, interface) of the default route the kernel uses:
+    the lowest metric when there are several."""
+    best = None
     for line in text.splitlines()[1:]:
         cols = line.split()
         if len(cols) >= 8 and cols[1] == "00000000" and cols[7] == "00000000" and int(cols[3], 16) & 0x1:
-            gw = int(cols[2], 16)
-            return (socket.inet_ntoa(struct.pack("<I", gw)) if gw else None), cols[0]
-    return None, None
+            if best is None or int(cols[6]) < int(best[6]):
+                best = cols
+    if best is None:
+        return None, None
+    gw = int(best[2], 16)
+    return (socket.inet_ntoa(struct.pack("<I", gw)) if gw else None), best[0]
 
 
 def parse_windows_route(text: str) -> tuple[str | None, str | None]:
     """`route print -4 0.0.0.0` → (gateway or None when "On-link", interface address) of the default route."""
-    m = _WIN_DEFAULT.search(text)
-    if not m:
+    routes = list(_WIN_DEFAULT.finditer(text))
+    if not routes:
         return None, None
+    m = min(routes, key=lambda r: int(r.group(3)))  # several default routes: Windows uses the lowest metric
     gw = m.group(1) if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", m.group(1)) else None
     return gw, m.group(2)
 
