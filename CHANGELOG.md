@@ -4,6 +4,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-24
+
 ### Fixed
 - Under Compose, `agent_name` and `[web] bind` in `whydrop.toml` were ignored (Compose always passed its own defaults). Compose now passes a lower-priority default (`WHYDROP_DEFAULT_WEB_BIND`), so the file wins and `.env` still wins over both.
 - A drop that ended less than 80 s before an agent restart, or was open across it, never alerted; it is now finalized (and alerted) at the restart.
