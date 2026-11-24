@@ -4,6 +4,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+### Added
+- ISP report: "ISP report (this month)" on the Drops page and `GET /api/isp-report` give plain text with only the events beyond the router (line drops, slowdowns, lossy periods, public IP changes, ISP DNS failures), each with the router's answers at the same moment. Home-network events and periods annotated as tests are counted, not listed.
+
 ## [0.4.0] - 2026-11-24
 
 ### Added

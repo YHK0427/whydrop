@@ -208,5 +208,6 @@
   "ruled.line_late": "Not a line outage: {answered} of {sent} probes beyond the router were answered, {late} of them late",
   "ruled.dns": "Not DNS: resolvers answered {ok} times",
   "ruled.ip": "Not an IP change: the public IP stayed the same",
-  "ruled.local": "Not this device or its link: both stayed up"
+  "ruled.local": "Not this device or its link: both stayed up",
+  "drops.isp": "ISP report (this month)"
 }
