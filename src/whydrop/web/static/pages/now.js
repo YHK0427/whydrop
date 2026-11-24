@@ -32,7 +32,7 @@ function lastDrop(drops, st) {
     const since = st?.since_ms ? (Date.now() - st.since_ms) / 1000 : st?.since_s != null ? -st.since_s : 0;
     return h("div", {},
       h("p", { class: "lastdrop" }, t("last.none", { dur: dur(since) })),
-      h("p", { class: "faint" }, t(isRemote() ? "test.hint_remote" : "test.hint")));
+      isPublic ? null : h("p", { class: "faint" }, t(isRemote() ? "test.hint_remote" : "test.hint")));   // the public view has no test button
   }
   const d = done[0];
   return h("div", { class: "row" },
@@ -84,7 +84,7 @@ export async function mount(main, { refresh }) {
     try {
       await api("/api/annotations", { method: "POST", json: { start_ms: Date.now(), end_ms: Date.now() + 120000, label: "user-test" } });
       toast(t("test.started"));
-    } catch (e) { toast(t("error.load", { what: "annotation", code: e.code || "?" })); }
+    } catch (e) { toast(t("error.load", { what: t("what.annotation"), code: e.code || "?" })); }
     setTimeout(() => { ev.target.disabled = false; }, 120000);
   } }, t("test.button"));
   const data = series(samples, st?.mode || "basic");

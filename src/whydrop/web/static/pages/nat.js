@@ -8,16 +8,19 @@ function bracket(rows) {
   return [ok.length ? Math.max(...ok) : null, hi];
 }
 
-function chart(byProto) {   // step lines of survival vs delay, log x axis, direct labels (light aqua < 3:1)
-  const W = 640, H = 200, L = 60, R = 70, T = 16, B = 34;
+function chart(byProto, W) {   // step lines of survival vs delay, log x axis, direct labels (light aqua < 3:1); W = drawn px, so 12 px text stays 12 px on a phone
+  const H = 200, L = 60, R = 70, T = 16, B = 34;
   const all = Object.values(byProto).flat().map(r => r.delay_s);
   if (!all.length) return null;
   const lx = (v) => L + (Math.log10(v) - 1) / (Math.log10(Math.max(...all, 600)) - 1) * (W - L - R);
   const ly = (alive) => (alive ? T + 20 : H - B - 10);
   const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": t("nat.title") });
   root.append(svg("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "var(--rule)" }));
+  let lastTick = -Infinity;
   for (const tick of [10, 30, 60, 300, 600, 1800, 3600]) {
     if (tick > Math.max(...all) * 1.5) break;
+    if (lx(tick) - lastTick < 44) continue;   // a phone has no room for every tick label
+    lastTick = lx(tick);
     root.append(svg("text", { x: lx(tick), y: H - 12, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 12 }, `${tick} s`));
   }
   root.append(svg("text", { x: 8, y: ly(1) + 4, fill: "var(--ink-3)", "font-size": 12 }, t("nat.alive")),
@@ -62,7 +65,7 @@ export async function mount(main, { refresh }) {
   const running = nat.running;
   const btn = isPublic ? null : h("button", { class: "btn primary", type: "button", disabled: running ? true : null, onclick: async () => {
     try { await api("/api/nat/run", { method: "POST" }); refresh(); }
-    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: "nat", code: e.code })); }
+    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: t("what.nat"), code: e.code })); }
   } }, t("nat.run"));
   const progress = running ? h("p", { class: "muted", "aria-live": "polite" }, t("nat.running", {
     proto: (running.last?.proto || "udp").toUpperCase(), delay: running.last?.delay_s ?? "…", done: running.done, total: running.total })) : null;
@@ -70,7 +73,7 @@ export async function mount(main, { refresh }) {
     h("td", {}, r.alive == null ? t("nat.inconclusive") : r.alive ? t("nat.alive") : t("nat.forgotten"))));
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("nat.title")),
     ...(hero.length ? hero : [h("p", { class: "empty" }, t("nat.none"))]), h("div", { class: "row" }, btn, progress)),
-    ...(rows.length ? [h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by)),
+    ...(rows.length ? [h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by, Math.min(640, Math.max(300, main.clientWidth - 32)))),
       h("table", { class: "data" }, h("tbody", {}, tableRows)))] : []));   // replaceChildren(null) prints "null"
   const poll = running ? setTimeout(() => location.hash === "#/nat" && refresh(), 5000) : null;
   return () => clearTimeout(poll);
