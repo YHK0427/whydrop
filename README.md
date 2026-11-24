@@ -107,7 +107,7 @@ Everything stays on your machine. whydrop never collects your Wi-Fi name; access
 
 **Why no ICMP ping?** It needs privileges in a container and many networks rate-limit or drop it, which looks like loss that isn't there. whydrop uses UDP (STUN, DNS, its own reflector) and TCP. The one exception is the router check on Windows, where an unprivileged ICMP echo is the reliable way to tell the router is alive.
 
-**Why Python, and how heavy is it?** Standard library only for the agent, the probes and the reflector (the dashboard adds FastAPI). Measured on a home server: about 19 MiB of memory for recording, about 39 MiB with the dashboard, about 2 % of one core. Traffic: about 6.5 kbit/s in basic mode (measured), about 18.5 kbit/s in precision mode (computed from measured packet sizes; the test suite keeps both under their budgets of 8 and 20 kbit/s).
+**Why Python, and how heavy is it?** Standard library only for the agent, the probes and the reflector (the dashboard adds FastAPI). Measured on a home server: about 19 MiB of memory for recording, about 39 MiB with the dashboard, about 55 MiB in precision mode once its 24-hour baselines have filled, about 2 % of one core. Traffic: about 6.5 kbit/s in basic mode (measured), about 18.5 kbit/s in precision mode (computed from measured packet sizes; the test suite keeps both under their budgets of 8 and 20 kbit/s).
 
 **Does precision mode need a paid VPS?** No. The reflector needs a public IP and one open port (UDP and TCP 48100); a free-tier VM is enough.
 

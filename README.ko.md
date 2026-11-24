@@ -107,7 +107,7 @@ docker compose exec whydrop whydrop nat-test
 
 **왜 ICMP ping을 안 쓰나요?** 컨테이너에서는 권한이 필요하고, 많은 네트워크가 ICMP를 제한하거나 버려서 없는 손실처럼 보여요. whydrop은 UDP(STUN, DNS, 자체 reflector)와 TCP를 써요. 유일한 예외는 Windows의 공유기 확인인데, 거기서는 권한 없는 ICMP echo가 공유기 생존을 확인하는 확실한 방법이라서예요.
 
-**왜 Python이고, 얼마나 무거운가요?** agent, 프로브, reflector는 표준 라이브러리만 써요(대시보드만 FastAPI를 더해요). 홈서버에서 잰 값: 기록만 하면 메모리 약 19 MiB, 대시보드까지 약 39 MiB, CPU 코어 하나의 약 2%. 트래픽은 기본 모드 약 6.5 kbit/s(측정), 정밀 모드 약 18.5 kbit/s(측정한 패킷 크기로 계산)이고, 테스트가 각각 8과 20 kbit/s 예산 안인지 확인해요.
+**왜 Python이고, 얼마나 무거운가요?** agent, 프로브, reflector는 표준 라이브러리만 써요(대시보드만 FastAPI를 더해요). 홈서버에서 잰 값: 기록만 하면 메모리 약 19 MiB, 대시보드까지 약 39 MiB, 정밀 모드에서 24시간 기준선이 다 차면 약 55 MiB, CPU 코어 하나의 약 2%. 트래픽은 기본 모드 약 6.5 kbit/s(측정), 정밀 모드 약 18.5 kbit/s(측정한 패킷 크기로 계산)이고, 테스트가 각각 8과 20 kbit/s 예산 안인지 확인해요.
 
 **정밀 모드에 유료 VPS가 필요한가요?** 아니요. reflector에는 공인 IP와 열린 포트 하나(UDP와 TCP 48100)만 있으면 돼요. 무료 티어 VM으로 충분해요.
 
