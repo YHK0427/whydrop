@@ -129,8 +129,8 @@ def _check_limits(c: "Config") -> None:
     for k, v in c.intervals.items():
         if not 0.5 <= v <= 3600:
             raise ConfigError(f"intervals.{k} must be 0.5–3600 s")
-    host, _, port = c.web.bind.rpartition(":")
-    if not host or not port.isdigit() or not 0 < int(port) < 65536:
+    port = c.web.bind.rpartition(":")[2]   # an empty host ("8790", ":8790") has always meant 127.0.0.1
+    if not port.isdigit() or not 0 < int(port) < 65536:
         raise ConfigError(f"web.bind must be host:port, got {c.web.bind!r}")
     if len(c.agent_name) > 64:
         raise ConfigError("agent_name must be at most 64 characters")

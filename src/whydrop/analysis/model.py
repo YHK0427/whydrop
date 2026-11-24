@@ -1,6 +1,6 @@
 """Analysis input: one Frame per second (by send time) and the Context the decisions need (spec §6.1–6.2)."""
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from whydrop.agent.events import Event
 from whydrop.agent.store import SampleRow
@@ -54,6 +54,16 @@ def line_quorum(probe: str, pair: str, ctx: Context) -> bool:
     return True
 
 
+def _merged(a: SampleRow, b: SampleRow) -> SampleRow:
+    ok = a.ok + b.ok
+    avg = None if not ok else ((a.rtt_avg or 0) * a.ok + (b.rtt_avg or 0) * b.ok) / ok
+    pick = lambda f, x, y: f(v for v in (x, y) if v is not None) if x is not None or y is not None else None   # noqa: E731
+    return replace(a, sent=a.sent + b.sent, ok=ok, lost=a.lost + b.lost, lost_up=a.lost_up + b.lost_up,
+                   lost_down=a.lost_down + b.lost_down, lost_dir_unknown=a.lost_dir_unknown + b.lost_dir_unknown,
+                   late=a.late + b.late, local_fail=a.local_fail + b.local_fail, rtt_min=pick(min, a.rtt_min, b.rtt_min),
+                   rtt_avg=avg, rtt_max=pick(max, a.rtt_max, b.rtt_max), rtt_p95=pick(max, a.rtt_p95, b.rtt_p95))
+
+
 class FrameBuilder:
     """Collects finalized rows and events; hands out frames strictly in order, one per second, empty ones included,
     once nothing can still change them (now − FINALIZE_LAG_MS)."""
@@ -72,7 +82,9 @@ class FrameBuilder:
             if self.next_ms is not None and r.ts_ms < self.next_ms:
                 self.late_rows += 1                   # that second was already judged
                 continue
-            self._rows.setdefault(r.ts_ms, {})[(r.probe, r.pair)] = r
+            d = self._rows.setdefault(r.ts_ms, {})
+            old = d.get((r.probe, r.pair))
+            d[(r.probe, r.pair)] = r if old is None else _merged(old, r)   # a second written in two parts, as the store sums it
             if self.next_ms is None:
                 self.next_ms = r.ts_ms
 

@@ -91,18 +91,20 @@ def rewrite(db: Path, backup: Path) -> list[dict]:
         for rid, start, end, tags, ev in con.execute(
                 "SELECT id, start_ms, end_ms, tags_json, evidence_json FROM incidents WHERE end_ms IS NOT NULL "
                 "ORDER BY id").fetchall():
-            old = json.loads(ev or "{}")
+            old, tags = json.loads(ev or "{}"), json.loads(tags or "{}")
             row = {"id": rid, "start_ms": start, "old": old.get("label")}
-            if (json.loads(tags or "{}")).get("point"):
+            if tags.get("point"):
                 out.append({**row, "status": "point event"})
                 continue
             if first is None or start < first:
                 out.append({**row, "status": "no 1 s data"})
                 continue
+            segs = set(tags.get("segments") or [])
             m = [f for f in finals if not f.incident.point and f.incident.start_ms <= end + SLACK_MS
-                 and (f.incident.end_ms or f.incident.start_ms) >= start - SLACK_MS]
+                 and (f.incident.end_ms or f.incident.start_ms) >= start - SLACK_MS
+                 and f.incident.segments & segs]   # the same drop: overlapping in time *and* in where it broke
             if len(m) != 1:
-                out.append({**row, "status": f"{len(m)} replayed matches"})
+                out.append({**row, "status": "not a drop now" if not m else f"ambiguous ({len(m)})"})
                 continue
             c, inc = m[0].cause, m[0].incident
             new = {k: v for k, v in old.items() if not k.startswith("cause_")}   # the old rule's own evidence goes

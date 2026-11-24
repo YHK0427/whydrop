@@ -133,5 +133,6 @@ def test_values_that_would_misbehave_are_refused_by_name(tmp_path, toml, key):
 
 def test_web_bind_from_the_environment_is_checked_too():
     with pytest.raises(ConfigError, match=r"web\.bind"):
-        load_config(None, {"WHYDROP_WEB_BIND": "8790"})
+        load_config(None, {"WHYDROP_WEB_BIND": "127.0.0.1:http"})
+    assert load_config(None, {"WHYDROP_WEB_BIND": ":8790"}).web.bind == ":8790"   # worked before: still does
     assert load_config(None, {"WHYDROP_WEB_BIND": "0.0.0.0:8790"}).web.bind == "0.0.0.0:8790"

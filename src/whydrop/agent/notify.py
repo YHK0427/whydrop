@@ -42,7 +42,7 @@ def text(row: dict, now_ms: int, name: str | None = None, lang: str = "en", held
     if held:   # drops the hourly cap held back
         sentence += (f" (알리지 않은 끊김 {held}개 더: 대시보드를 보세요)" if lang == "ko"
                      else f" (+{held} more drops not alerted; see the dashboard)")
-    return " ".join(title.split()), sentence   # no CR/LF in a header   # no CR/LF in a header
+    return " ".join(title.split()), sentence   # no CR/LF in a header
 
 
 def _header(v: str) -> str:
@@ -86,11 +86,16 @@ class Notifier:
     def enabled(self) -> bool:
         return bool(self.url)
 
+    def _capped(self, now: int) -> bool:
+        self._recent = [t for t in self._recent if now - t < 3600_000]
+        return len(self._recent) >= MAX_PER_HOUR
+
     async def _send(self, row: dict) -> bool:
         body, headers = payload(row, self.fmt, self.now_ms(), self.name, self.lang, self.held)
         try:
             await asyncio.to_thread(_post, self.url, body, headers)
             self.held = 0
+            self._recent.append(self.now_ms())   # only deliveries count: a down endpoint doesn't use up the hour
             return True
         except Exception as e:   # OSError, http.client errors, …: log the type only (the URL may hold a token)
             log.warning("alert not delivered (%s); will retry", type(e).__name__)
@@ -101,12 +106,10 @@ class Notifier:
         if not self.enabled or msg.get("type") != "incident" or data.get("op") != "finalized":
             return
         now = self.now_ms()
-        self._recent = [t for t in self._recent if now - t < 3600_000]
-        if len(self._recent) >= MAX_PER_HOUR:
+        if self._capped(now):
             self.held += 1
             log.info("alert held: %d alerts in the last hour", len(self._recent))
             return
-        self._recent.append(now)
         if not await self._send(data["row"]):
             self.queue.append({"row": data["row"], "first_ms": now, "next_ms": now + BACKOFF_S[0] * 1000, "tries": 1})
             if len(self.queue) > MAX_QUEUE:
@@ -120,7 +123,7 @@ class Notifier:
             if now - item["first_ms"] > KEEP_MS:
                 log.warning("alert dropped after 24 h of failed deliveries")
                 continue
-            if item["next_ms"] > now:
+            if item["next_ms"] > now or self._capped(now):   # a recovered endpoint gets the backlog at the hourly pace
                 keep.append(item)
             else:
                 changed = True   # sent, or failed again with a new backoff: either way the saved queue is stale

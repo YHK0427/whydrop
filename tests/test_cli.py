@@ -127,8 +127,10 @@ def test_replay_write_rewrites_stale_verdicts_after_a_backup(tmp_path, capsys):
     ins = ("INSERT INTO incidents (agent_id, start_ms, end_ms, primary_cause, cause_final, tags_json, evidence_json) "
            "VALUES (1, ?, ?, ?, ?, ?, ?)")
     stale = {"label": "Router problem (likely)", "cause": "R1b", "next_step": "Reboot the router", "cause_classes": ["x"]}
-    con.execute(ins, (t0 + 30_000, t0 + 35_000, "R1b", "R1b", json.dumps({"segments": ["lan"], "point": None}),
+    con.execute(ins, (t0 + 30_000, t0 + 35_000, "R1b", "R1b", json.dumps({"segments": ["lan", "line"], "point": None}),
                       json.dumps(stale)))
+    con.execute(ins, (t0 + 31_000, t0 + 33_000, "R3", "R3", json.dumps({"segments": ["dns_router"], "point": None}),
+                      json.dumps({"label": "Router DNS failure (likely)", "cause": "R3"})))   # same time, elsewhere
     con.execute(ins, (t0 + 32_000, t0 + 32_000, "R5_reset", "R5_reset", json.dumps({"segments": [], "point": "nat_reset"}),
                       json.dumps({"label": "NAT/firewall reset (likely)", "cause": "R5"})))
     con.execute(ins, (t0 - 30 * 86_400_000, t0 - 30 * 86_400_000 + 5000, "R1b", "R1b",
@@ -143,10 +145,11 @@ def test_replay_write_rewrites_stale_verdicts_after_a_backup(tmp_path, capsys):
     rule, ev = rows[1]
     assert rule == "R2" and "likely" in ev["label"] and ev["label"] != stale["label"] and "cause_classes" not in ev
     assert "protocol" in ev and "protocol_ko" in ev
-    assert rows[2][0] == "R5_reset" and rows[3][1] == stale                          # point event, data gone: untouched
+    assert rows[2][0] == "R3" and rows[3][0] == "R5_reset" and rows[4][1] == stale   # other place, point, no data
     [backup] = list(tmp_path.glob("w.db.before-replay-*.db"))
     con = sqlite3.connect(backup)
     assert con.execute("SELECT cause_final FROM incidents WHERE id = 1").fetchone() == ("R1b",)
     con.close()
-    assert "1 rewritten" in out and "point event" in out and "no 1 s data" in out and str(backup.name) in out
+    assert "1 rewritten" in out and "not a drop now" in out and "point event" in out and "no 1 s data" in out
+    assert str(backup.name) in out
     assert main(["replay", str(db), "--write", "--set", "LINE_LOOKBACK_S=9"]) == 2   # never write tuned verdicts
