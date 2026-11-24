@@ -198,7 +198,7 @@
   "fact.gw": "Router check: {ok} of {sent} answered, usually {base} ms, up to {peak} ms",
   "fact.line": "Beyond the router: {sent} probes, {ok} on time, {late} late, {lost} lost",
   "fact.stream": "UDP stream: {up} lost on the way up, {down} on the way down",
-  "fact.tcp": "TCP canary: {retrans} retransmissions, RTO {rto_lo} → {rto_hi} s, {rst}",
+  "fact.tcp": "TCP canary: retransmissions {retrans}, RTO {rto_lo} → {rto_hi} s, {rst}",
   "fact.wifi": "Wi-Fi re-associated or roamed {n} times around the start",
   "fact.ip": "Public IP changed {at} s after the start",
   "fact.dns": "DNS failed: {classes}",
