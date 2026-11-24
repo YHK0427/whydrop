@@ -17,6 +17,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `whydrop replay --set STREAM_LOSS_S=…` had no effect (the 2 s was hard-coded); the unused `TIMEOUT_S` is gone, and three thresholds that lived outside `constants.py` (`LOSS_MIN_SENDS`, `WEAK_MIN_SAMPLES`, `ROAM_LOSS_WINDOW_S`) can now be set too.
 - `[intervals] link` was accepted and ignored (the link check runs every second by design); it is now rejected as an unknown key.
 - Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
+- The config now refuses values that parsed but misbehaved: `udp_stream.pps` outside 1–100 and intervals outside 0.5–3600 s (which could hammer the router or public servers), a `notify.format` typo (alerts silently went out as JSON), non-http(s) alert URLs, target or `web.bind` ports outside 1–65535, a negative `storage.min_free_mb` and an `agent_name` over 64 characters.
+- An empty host, port 0 or an IPv6 address in `reflector` now turns precision mode off with the reason, as `host:abc` already did, instead of starting precision mode against an address it can't use (the sockets are IPv4).
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 
 ## [0.1.0] - 2026-11-23

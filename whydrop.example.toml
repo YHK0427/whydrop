@@ -2,8 +2,8 @@
 # Precedence: WHYDROP_* environment variables > this file > built-in defaults.
 # Secrets never go here: WHYDROP_SECRET and WHYDROP_UI_TOKEN come from the environment only.
 
-agent_name = "home"                      # shown in the dashboard header and alerts
-# reflector = "reflector.example.net"    # enables precision mode (needs WHYDROP_SECRET)
+agent_name = "home"                      # shown in the dashboard header and alerts (≤ 64 characters)
+# reflector = "reflector.example.net"    # host or host:port, IPv4 or a name; enables precision mode (needs WHYDROP_SECRET)
 db_path = "./whydrop-data/whydrop.db"
 
 # Auto-detection overrides (leave unset unless detection gets it wrong)
@@ -13,7 +13,7 @@ db_path = "./whydrop-data/whydrop.db"
 # isp_dns = ["198.51.100.53"]
 # wifi_interface = "wlan0"
 
-# Probe intervals in seconds
+# Probe intervals in seconds (0.5–3600)
 # [intervals]
 # gateway = 1.0
 # line_hb = 1.0
@@ -38,7 +38,7 @@ public_view_default = false
 idle_interval_s = 600                    # 30–7500; how long the idle TCP connection stays silent
 
 [udp_stream]
-pps = 10
+pps = 10                                 # 1–100 packets a second
 
 [nat]
 enable_7500 = false                      # also try 7500 s TCP (just over the RFC 5382 minimum of 2 h 4 min) in nat-test and the dashboard button
