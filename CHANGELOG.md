@@ -5,6 +5,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 ## [Unreleased]
 
 ### Fixed
+- A line drop starting 119–120 s after a Wi-Fi, cable or router recovery (or up to 10 s earlier during a lossy period) became a separate drop: the earlier drop's cause was made final at 120 s, before the line drop could be confirmed. Those drops are now final 130 s after they end, and the line drop joins them as documented.
 - A short line drop soon after a router outage was dropped as a "burst": the router outage's own lost heartbeats counted as a lossy period. Seconds inside an earlier outage no longer count, so the drop joins the router's incident as a restart.
 - The 6 h, 24 h and 7 d charts were empty for the first 7 days: 1-minute aggregates were only made from 1-second rows older than 7 days. They are now made as data comes in, 5 minutes behind, and the long views read them together with the latest 1-second rows, counting each second once.
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.

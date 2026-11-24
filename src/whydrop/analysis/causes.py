@@ -186,7 +186,7 @@ class Settler:
                 c.incident.evidence["provisional"] = prov.rule
                 wait = K.SETTLE_S
                 if c.incident.segments & {"lan", "wifi", "link", "host_net"}:
-                    wait = max(wait, K.MERGE_AFTER_LOCAL_S)   # a line drop may still join it (router restart)
+                    wait = max(wait, K.MERGE_AFTER_LOCAL_S + K.GATE_SHORT_S)  # a line drop may still join it, confirmed up to 10 s late
                 self._due[c.incident.key] = (c.incident.end_ms + wait * 1000, c.incident, prov)
             elif c.op != "close":
                 self._due.pop(c.incident.key, None)   # reopened by a merge: settle again after the new end

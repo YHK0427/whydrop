@@ -20,7 +20,7 @@ The rules whydrop uses to decide, with every threshold. All thresholds live in `
 3. **Segment states**, decided per frame (below).
 4. **Incidents** open when a segment goes down; some open as points without any segment going down.
 5. **Conditions** (loss, latency, weak signal, Wi-Fi/LAN loss, busy host): lasting over 30 s they become *rough patches*. They label patches; they never open incidents on their own.
-6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 120 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging); then frozen. Whether the final differs from the provisional is stored.
+6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 130 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging; the line down can be confirmed up to 10 s after its start); then frozen. Whether the final differs from the provisional is stored.
 
 An incident's end is the first success that counts as recovery; for the line, the first success of a basic line-quorum probe — never the canary, whose TCP retransmission timer makes it recover late, and never udp_stream.
 

@@ -52,7 +52,7 @@ Every second (about 14 seconds behind real time, so late replies are counted) th
 
 A hop that goes down opens a **drop**. Drops that follow each other closely are merged (a router reboot is one drop, not three). Some things are drops without any hop going down: a public IP change, an idle connection forgotten by a NAT, a NAT state reset.
 
-Then **rules in priority order** name the likely cause (Wi-Fi first, then cable, this device, router, public IP change, NAT, DNS, the ISP line; queueing is checked before blaming the router or the line). The cause is provisional while the drop is open and becomes final 80 s after it ends (120 s after a Wi-Fi, cable or router drop), when late evidence (such as a public-IP change seen a minute later) has arrived.
+Then **rules in priority order** name the likely cause (Wi-Fi first, then cable, this device, router, public IP change, NAT, DNS, the ISP line; queueing is checked before blaming the router or the line). The cause is provisional while the drop is open and becomes final 80 s after it ends (130 s after a Wi-Fi, cable or router drop), when late evidence (such as a public-IP change seen a minute later) has arrived.
 
 **Things that are not drops:** random packet loss is a *rough patch*, not an outage — a short failure inside a period of ongoing loss is treated as part of it, which keeps a lossy line from producing dozens of fake drops an hour. The agent's own host being busy, or asleep, is excluded from every decision.
 

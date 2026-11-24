@@ -299,6 +299,21 @@ def test_merge_after_end(gap, merged):
         (1 if merged else 2)
 
 
+@pytest.mark.parametrize("gap, merged", [(119, True), (120, True), (121, False)])
+def test_merge_after_router_recovery_is_a_router_restart(gap, merged):
+    fs = finals(router_drop(Scenario.default(500), 30, 40).internet_down(40 + gap, 50 + gap))
+    assert len(fs) == (1 if merged else 2) and (texts.ROUTER_RESTART in fs[0].incident.chain) == merged
+    assert len({f.incident.key for f in fs}) == len(fs)              # each finalized once
+
+
+def test_gated_line_drop_late_in_the_merge_window_still_joins():
+    """A line down in a lossy period is confirmed only 10 s after its start: the router incident must wait for it."""
+    s = router_drop(Scenario.default(500), 30, 40)
+    s = lossy_before(s, range(100, 160, 10)).internet_down(155, 175)   # 6 of 60 heartbeats lost before it: gated
+    [f] = finals(s)
+    assert f.incident.segments == {"lan", "line"} and texts.ROUTER_RESTART in f.incident.chain
+
+
 def test_line_drop_after_a_wifi_drop_joins_without_router_restart():
     [f] = finals(Scenario.default(400).event("reassoc", 30).fail(30, 40, probes={"wifi"}).internet_down(100, 110))
     assert f.incident.segments == {"wifi", "line"} and texts.ROUTER_RESTART not in f.incident.chain
