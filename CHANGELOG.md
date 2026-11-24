@@ -18,6 +18,7 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `[intervals] link` was accepted and ignored (the link check runs every second by design); it is now rejected as an unknown key.
 - Alerts can be in Korean (`[notify] lang = "ko"`), with the dashboard's wording; the Korean summary and the public demo's Korean copy button no longer mix in English cause labels. An ntfy title with a non-ASCII or multi-line agent name no longer fails to send.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
+- Precision mode: one ECHO arriving more than 3 s out of order made the next ECHO look like the end of an outage and recorded a UDP outage with made-up download loss. An ECHO delayed from before a reflector restart was counted as a lost packet although it came back.
 
 ## [0.1.0] - 2026-11-23
 
