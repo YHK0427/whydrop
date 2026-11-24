@@ -644,7 +644,7 @@ def test_a_verdict_shows_its_measurements_instead_of_likely(browser, base, lang,
               "facts": [{"k": "dur", "dur": 8, "segs": ["line"]}, {"k": "gw", "sent": 11, "ok": 11, "lost": 0, "late": 0, "base": 3, "peak": 412},
                         {"k": "line", "sent": 24, "ok": 0, "late": 24, "lost": 0, "peak": None},
                         {"k": "tcp", "stall": 3.03, "retrans": 1, "rto_lo": 0.22, "rto_hi": 5.79, "rst": False}],
-              "ruled_out": [{"k": "router", "ok": 11, "sent": 11}, {"k": "line_late", "late": 24, "sent": 24}, {"k": "ip"}]}
+              "ruled_out": [{"k": "router", "ok": 11, "sent": 11, "crossed": 24}, {"k": "line_late", "answered": 24, "late": 24, "sent": 24}, {"k": "ip"}]}
         body.update(primary_cause="R7", cause_final="R7", evidence_json=_json.dumps(ev),
                     tags_json=_json.dumps({"segments": ["line"], "tags": [], "chain": [], "point": None}))
         route.fulfill(content_type="application/json", body=_json.dumps(body))

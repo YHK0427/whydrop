@@ -202,7 +202,7 @@ def test_summary_carries_the_measurements_behind_the_verdict(tmp_path):
     path = tmp_path / "w.db"
     facts = [{"k": "dur", "dur": 8, "segs": ["line"]}, {"k": "gw", "sent": 11, "ok": 11, "lost": 0, "late": 0, "base": 3.0, "peak": 412.0},
              {"k": "line", "sent": 24, "ok": 0, "late": 24, "lost": 0, "peak": None}]
-    ruled = [{"k": "router", "ok": 11, "sent": 11}, {"k": "line_late", "late": 24, "sent": 24}]
+    ruled = [{"k": "router", "ok": 11, "sent": 11, "crossed": 24}, {"k": "line_late", "answered": 24, "late": 24, "sent": 24}]
 
     async def go():
         s = Store(path)
@@ -218,5 +218,6 @@ def test_summary_carries_the_measurements_behind_the_verdict(tmp_path):
     ko = c.get(f"/api/incidents/{iid}/summary?lang=ko").text
     en = c.get(f"/api/incidents/{iid}/summary").text
     assert "판단 근거:" in ko and "공유기 확인: 11번 중 11번 응답, 평소 3.0 ms, 최대 412.0 ms" in ko and "회선 단절 아님" in ko
-    assert "Why:" in en and "+ Router check: 11 of 11 answered" in en and "- Not a line outage: 24 of 24" in en
+    assert "Why:" in en and "+ Router check: 11 of 11 answered" in en and "- Not a line outage: 24 of 24 probes beyond the router were answered" in en
+    assert "- Not a router failure: 24 replies from beyond it crossed it" in en
     assert c.get(f"/api/incidents/{iid}?public=1").json()["evidence"]["facts"] == facts

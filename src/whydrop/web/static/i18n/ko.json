@@ -203,9 +203,9 @@
   "fact.ip": "시작 {at}초 뒤 공인 IP 변경",
   "fact.dns": "DNS 실패: {classes}",
   "ruled.wifi": "와이파이 연결 문제 아님: 앞뒤 {window}초 안에 재연결·로밍 없음",
-  "ruled.router": "공유기 고장 아님: 확인 {sent}번 중 {ok}번 응답",
+  "ruled.router": "공유기 고장 아님: 공유기 너머의 응답 {crossed}개가 공유기를 지나 돌아왔고, 공유기도 확인 {sent}번 중 {ok}번 응답",
   "ruled.line_ok": "회선 장애 아님: 공유기 너머 프로브 {sent}개 중 {ok}개 응답",
-  "ruled.line_late": "회선 단절 아님: 응답 {sent}개 중 {late}개가 늦게라도 도착",
+  "ruled.line_late": "회선 단절 아님: 공유기 너머 프로브 {sent}개 중 {answered}개가 응답, 그중 {late}개는 늦게",
   "ruled.dns": "DNS 문제 아님: resolver가 {ok}번 응답",
   "ruled.ip": "IP 변경 아님: 공인 IP 그대로",
   "ruled.local": "이 기기·연결 문제 아님: 계속 정상"
