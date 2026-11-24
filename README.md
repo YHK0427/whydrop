@@ -4,21 +4,27 @@
 
 [![ci](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml/badge.svg)](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11–3.13-blue)
 
-whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **likely cause**, and what TCP and UDP did meanwhile.
+whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **cause**, the **measurements that back it** and the causes they rule out, and what TCP and UDP did meanwhile.
 
 [![The live demo: the path, the verdict for an 8-second drop, and its ±60 s packet timeline](https://raw.githubusercontent.com/YHK0427/whydrop/main/docs/media/demo.gif)](https://yhk0427.github.io/whydrop/)
 
-Three verdicts, worded as its alerts word them (durations made up):
+A real 8-second stall from the demo, as whydrop reported it:
 
-> **Internet line dropped for 46 s. Line drop in the ISP segment (likely).** *Save the evidence with export and contact your ISP.*
+> **Home network slowed down for 8 s. In-home queueing.** *The delay starts before the router: check the Wi-Fi signal and heavy traffic from other devices at home.*
 >
-> **Wi-Fi dropped for 4 s. Wi-Fi problem (likely).** *If the signal was weak, move the AP or change channel. If the AP vanished, check its power or reboot it.*
+> **Measured**
+> - ✓ Router check: 4 of 13 answered, usually 2.0 ms, up to 845.7 ms
+> - ✓ Beyond the router: 173 probes, 82 on time, 76 late, 15 lost
+> - ✓ TCP canary: retransmissions 1, RTO 0.22 → 5.79 s, no RST
 >
-> **NAT/firewall state expired (likely).** *The idle interval is longer than the measured NAT timeout: set keepalive below it.*
+> **Ruled out**
+> - ✗ Not a router failure: 158 replies from beyond it crossed it, and it answered 4 of 13 checks itself
+> - ✗ Not a line outage: 158 of 173 probes beyond the router were answered, 76 of them late
+> - ✗ Not the Wi-Fi link, not DNS, not an IP change, not this device
 
-The drop's page adds the evidence: which direction lost the packets, what the router did meanwhile, what TCP did.
+Other verdicts: a line drop in the ISP segment, Wi-Fi, the cable, the router, a public IP change, NAT state lost or reset, DNS (router, ISP or public resolvers), a lossy line. Loss in precision mode is placed upload or download, per packet.
 
-**[Live demo](https://yhk0427.github.io/whydrop/)**: the dashboard's public view over two days of real recordings, with faults injected on purpose (read-only, times relative to the recording).
+**[Live demo](https://yhk0427.github.io/whydrop/)**: the dashboard's public view over three days of real recordings, with faults injected on purpose (read-only, times relative to the recording).
 
 ## Quick start
 

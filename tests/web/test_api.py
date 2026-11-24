@@ -218,6 +218,8 @@ def test_summary_carries_the_measurements_behind_the_verdict(tmp_path):
     ko = c.get(f"/api/incidents/{iid}/summary?lang=ko").text
     en = c.get(f"/api/incidents/{iid}/summary").text
     assert "판단 근거:" in ko and "공유기 확인: 11번 중 11번 응답, 평소 3.0 ms, 최대 412.0 ms" in ko and "회선 단절 아님" in ko
+    assert "Cause: In-home queueing\n" in en.replace("\r", "") and "(likely)" not in en
+    assert "원인: 집 안 대기열\n" in ko.replace("\r", "")
     assert "Why:" in en and "+ Router check: 11 of 11 answered" in en and "- Not a line outage: 24 of 24 probes beyond the router were answered" in en
     assert "- Not a router failure: 24 replies from beyond it crossed it" in en
     assert c.get(f"/api/incidents/{iid}?public=1").json()["evidence"]["facts"] == facts

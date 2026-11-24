@@ -4,6 +4,7 @@ import csv
 import functools
 import io
 import json
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -70,6 +71,11 @@ def _words(lang: str) -> dict:
     return json.loads((files("whydrop.web") / "static" / "i18n" / f"{lang}.json").read_text(encoding="utf-8"))
 
 
+def _bare(label: str, why: list) -> str:
+    """With the measurements listed below it, the cause drops its "(likely)" suffix, as on the drop page."""
+    return re.sub(r"\s*\((likely|추정)\)$", "", label) if why else label
+
+
 def _why_lines(ev: dict, lang: str) -> list[str]:
     """The dashboard's "Why this verdict" lines, in the same words (i18n fact.* / ruled.*)."""
     w = _words("ko" if lang == "ko" else "en")
@@ -110,14 +116,14 @@ def summary(db, iid: int, lang: str = "en", public_view: bool = False, now_ms: i
     why = _why_lines(ev, lang)
     if lang == "ko":
         from whydrop.web.public import localized
-        lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"추정 원인: {localized(ev.get('label', '-'), 'ko')}",
+        lines = [f"끊김: {when}, {dur:.0f}초, {where}", f"{'원인' if why else '추정 원인'}: {_bare(localized(ev.get('label', '-'), 'ko'), why)}",
                  f"다음에 할 일: {localized(ev.get('next_step', '-'), 'ko')}"]
         if ev.get("protocol"):   # rows from before 0.1.1 have only the English one
             lines.append(f"프로토콜로 보면: {ev.get('protocol_ko') or ev['protocol']}")
         if why:
             lines.append("판단 근거:")
     else:
-        lines = [f"Drop: {when}, {dur:.0f} s, {where}", f"Likely cause: {ev.get('label', '-')}",
+        lines = [f"Drop: {when}, {dur:.0f} s, {where}", f"{'Cause' if why else 'Likely cause'}: {_bare(ev.get('label', '-'), why)}",
                  f"What to do next: {ev.get('next_step', '-')}"]
         if ev.get("protocol"):
             lines.append(f"In protocol terms: {ev['protocol']}")
