@@ -20,7 +20,7 @@ The rules whydrop uses to decide, with every threshold. All thresholds live in `
 3. **Segment states**, decided per frame (below).
 4. **Incidents** open when a segment goes down; some open as points without any segment going down.
 5. **Conditions** (loss, latency, weak signal, Wi-Fi/LAN loss, busy host): lasting over 30 s they become *rough patches*. They label patches; they never open incidents on their own.
-6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 120 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging); then frozen. Whether the final differs from the provisional is stored.
+6. **Causes**: provisional while open; final 80 s after the end (R4's 60 s window plus two STUN intervals), or 130 s when this device, Wi-Fi, the cable or the router was down, so a line drop that follows can still join it (see Merging; the line down can be confirmed up to 10 s after its start); then frozen. Whether the final differs from the provisional is stored.
 
 An incident's end is the first success that counts as recovery; for the line, the first success of a basic line-quorum probe — never the canary, whose TCP retransmission timer makes it recover late, and never udp_stream.
 
@@ -39,7 +39,7 @@ An incident's end is the first success that counts as recovery; for the line, th
 
 **Local vs. remote errors**: a send error is local only when the route table has no route for it (→ `host_net`). Errors reported back by the network with a route present (host unreachable, refused, administratively prohibited) are failures with the evidence "router reported unreachable".
 
-**The lossy-period gate**: if line heartbeat loss over the 60 s before a line-down start was ≥ 5 %, a down that recovers within 10 s is not an incident; it is a burst inside the loss condition. In a simulation (basic mode, 1 h per point), random loss of 5 / 10 / 20 / 30 % per direction produced 3 / 19 / 106 / 127 false line drops an hour without the gate and 0 / 0 / 2 / 0 with it, while 400 of 400 three-second blackholes on a clean line were caught either way.
+**The lossy-period gate**: if line heartbeat loss over the 60 s before a line-down start was ≥ 5 %, a down that recovers within 10 s is not an incident; it is a burst inside the loss condition. Seconds inside an earlier outage (the line, the router, Wi-Fi, the cable or this device down) don't count as loss. In a simulation (basic mode, 1 h per point), random loss of 5 / 10 / 20 / 30 % per direction produced 3 / 19 / 106 / 127 false line drops an hour without the gate and 0 / 0 / 2 / 0 with it, while 400 of 400 three-second blackholes on a clean line were caught either way.
 
 **Why the router rule needs the line too**: on a Wi-Fi host, power save and contention can delay the router check past its 1.5 s timeout twice in a row while the internet keeps answering through the same router. Replaying 10 hours recorded on a real Wi-Fi home server, requiring that nothing answered through the router removed 18 of 32 drops, all 2–7 s "router" drops during which line probes were succeeding.
 
@@ -60,6 +60,7 @@ An incident's end is the first success that counts as recovery; for the line, th
 ## Merging
 
 - A segment down starting within 10 s of the previous incident's end joins it.
+- If no probe reported for over 60 s while a drop was open (the agent stopped, or the clock stepped forward), the drop ends at the last second with data, tagged `data_gap`, instead of stretching over the gap.
 - A line down starting within 120 s of a Wi-Fi, cable or router recovery joins that incident; with the router down, it reads "router restart (likely)".
 - Past 1 h an incident is marked a long outage.
 - Gaps in recording (from the agent's 30 s heartbeat) show as "not recording"; incidents left open by a restart are closed and tagged.
@@ -75,14 +76,14 @@ In priority order; windows are anchored on the incident start unless a rule says
 | R1d | Host network config lost | host_net down (address or route gone while the link is up) | Restart the host's network service; if it repeats, check DHCP leases |
 | R1b | Router problem | lan down, Wi-Fi/cable up. Not evaluated when link state is unknown or egress is a VPN | Reboot the router; if it repeats, attach the records |
 | R4 | Public IP change | during the incident or within 60 s after it, both STUN providers report the same new IP twice in a row. Also a point incident on its own | Your ISP reassigned your IP; if it happens often, contact them with the records |
-| R5 | NAT/firewall state lost | the idle canary's ping never arrived while the hot connection and udp_stream lost nothing around it → point incident. "Expiry" if the idle interval exceeded the measured timeout, otherwise "loss". Also: an RST on the hot canary with a NAT mapping reset within ±10 s and no IP change → "NAT state reset" | Set keepalive below the timeout nat-test measured. For a reset: look for router or CGNAT restarts |
+| R5 | NAT/firewall state lost | the idle canary's ping never arrived, udp_stream and the hot canary lost nothing from 10 s before to 5 s after, and the hot connection had no stall or RST within ±10 s → point incident (the same idle interval failing again is reported once, as a finding). "Expiry" if the idle interval exceeded the measured timeout, otherwise "loss". Also: an RST on the hot canary with a NAT mapping reset within ±10 s and no IP change → "NAT state reset" | Set keepalive below the timeout nat-test measured. For a reset: look for router or CGNAT restarts |
 | R3 | DNS failure | a DNS segment down while the line is fine. Router only → router DNS. ISP only → ISP DNS. Router + ISP with public fine → ISP DNS outage. Public only → public resolvers blocked on this network. Public together with another class → DNS-wide | Switch your device or router to a public DNS |
 | R2 | Line drop (ISP segment) | line down, lan fine, egress not via a VPN. Upload/download split added after settling | Save the evidence with export and contact your ISP |
 | R6 | Lossy line | labels a loss rough patch. "Home network" first, when ≥ 5 % of the router checks over the last 60 s failed too and at least half the line heartbeat's loss rate over the same 60 s, unless the router never answers (next step: check the Wi-Fi or the cable); otherwise "line" in basic mode, or in precision mode when line heartbeat loss is ≥ 2.5 % too; otherwise "path to the reflector" | Save the evidence and contact your ISP |
 | R7 | High latency (queueing) | labels a latency rough patch; also the primary cause of a router or line drop under the queueing-first rule below | Enable SQM (cake/fq_codel) on the router, or limit uploads |
 | — | Unknown | none of the above | File a "wrong diagnosis" issue with the bug report attached |
 
-**Queueing first**: before R1b, R2 or R6, if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too (either way), "in-home queueing", whose next step points at the Wi-Fi and other devices at home instead of SQM. R7 is shown as the path slowing down, not dropping; for in-home queueing the dashboard, alerts and summary name the home network and mark the Wi-Fi or cable hop.
+**Queueing first**: before R1b or R2 (R6 labels rough patches without this check), if successful samples in the previous 10 s were ≥ 3× baseline and ≥ +50 ms, or at least half the failures behind a line down came back late, R7 is the primary cause ("queueing → timeouts"); with the router's RTT rising too (either way), "in-home queueing", whose next step points at the Wi-Fi and other devices at home instead of SQM. R7 is shown as the path slowing down, not dropping; for in-home queueing the dashboard, alerts and summary name the home network and mark the Wi-Fi or cable hop.
 
 Examples: a PPPoE redial → R4 with R2 as secondary. A router reboot seen over Wi-Fi → one incident, R1a, with the WAN coming back later joining it as "router restart (likely)". A saturated uplink → R7.
 

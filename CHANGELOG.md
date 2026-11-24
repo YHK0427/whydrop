@@ -8,6 +8,10 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - `whydrop replay --write`: after an upgrade, store the current analysis's verdict on past drops (backup first; point events and drops without 1-second data are left alone).
 
 ### Fixed
+- A Wi-Fi roam just before a line drop was reported twice, as a "roaming with loss" point and as the drop's Wi-Fi cause. The roam is now judged after the drop could be confirmed, so it is one drop.
+- A drop of exactly 1 h was marked a long outage: the tag was set while its recovery was still being confirmed. Only drops longer than 1 h keep it.
+- A line drop starting 119–120 s after a Wi-Fi, cable or router recovery (or up to 10 s earlier during a lossy period) became a separate drop: the earlier drop's cause was made final at 120 s, before the line drop could be confirmed. Those drops are now final 130 s after they end, and the line drop joins them as documented.
+- A short line drop soon after a router outage was dropped as a "burst": the router outage's own lost heartbeats counted as a lossy period. Seconds inside an earlier outage no longer count, so the drop joins the router's incident as a restart.
 - The 6 h, 24 h and 7 d charts were empty for the first 7 days: 1-minute aggregates were only made from 1-second rows older than 7 days. They are now made as data comes in, 5 minutes behind, and the long views read them together with the latest 1-second rows, counting each second once.
 - An in-home queueing verdict was shown as "Internet line dropped" with the line drawn cut. Queueing (R7) is now shown as slowing down, and in-home queueing names the home network and marks the Wi-Fi or cable hop, in the dashboard, alerts and the copied summary.
 - The Korean dashboard and summary showed the *In protocol terms* paragraph and evidence values (upload, download) in English. New drops store the paragraph in both languages; drops recorded before keep the English one.
@@ -26,6 +30,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 - A late reply for a second split across two writes was applied to the part without the loss, so the second showed the loss and the late reply both; a late reply with no loss left (a duplicate) no longer counts.
 - The analysis kept only the later part of a second written in two parts, so a loss in the first part could vanish from the verdict.
 - The dashboard API answered times or drop ids past 2^63 (or negative times) with a 500; they are now a 400.
+- CSV exports: text starting with `=`, `+`, `-` or `@` is prefixed with `'` so a spreadsheet shows it instead of running it as a formula.
+- A drop open across a stretch with no data (agent stopped, clock stepped forward) stretched over it, becoming a multi-hour "long outage" in a replay; it now ends at the last second with data, tagged `data_gap`.
 - A test reflector could fail to start on Windows, where TCP port blocks inside the UDP ephemeral range are reserved.
 - The reflector failed to start when its tombstone file held an infinite seq or very deeply nested JSON; it now logs the file as unreadable and starts empty, as it already did for other corrupt files.
 - On Windows, a UDP probe rejected with ICMP port or host unreachable (for example DNS on UDP 53 blocked by a firewall that rejects) was stored as a plain loss; it now carries the ICMP mark, as on Linux.
@@ -43,7 +49,7 @@ First release.
 ### Added
 
 **Agent (basic mode)**
-- Probes every second over TCP and UDP: router check (TCP RST from a closed port; ICMP echo on Windows), line heartbeat (STUN, rotating providers), DNS over UDP and TCP to the router, the ISP's resolvers and public resolvers, STUN mapped address, TCP connect to port 443.
+- Probes every second over TCP and UDP: router check (TCP RST from a closed port; ICMP echo on Windows), line heartbeat (a STUN or DNS question, rotating providers), DNS over UDP and TCP to the router, the ISP's resolvers and public resolvers, STUN mapped address, TCP connect to port 443.
 - Wi-Fi and link state from `iw`, `netsh` (English and Korean) and `/sys`: re-associations, roams, signal, carrier.
 - Environment detection and a self-check; watches for network changes every 5 s; refuses to run in a VM-backed Docker.
 - SQLite storage with 1-second and 1-minute aggregates, retention and a disk guard. About 19 MiB of memory, under 8 kbit/s.

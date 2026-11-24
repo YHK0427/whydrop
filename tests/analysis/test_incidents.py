@@ -154,3 +154,20 @@ def test_wifi_outage_with_probe_removed_stays_one_incident():
     ids = {id(x.incident) for x in out if x.op == "close"}
     [last] = [x.incident for x in out if x.op == "close"][-1:]
     assert len(ids) == 1 and sec(last.end_ms) >= 150
+
+
+def test_a_drop_open_across_a_stretch_without_data_ends_where_the_data_did():
+    """Audit: replay over a stopped agent (or a forward clock step) kept one drop open across the gap, so it became a
+    multi-hour long_outage and `replay --write` could pin that verdict on every stored drop inside it."""
+    s = Scenario.default(5000).internet_down(30, 4500)
+    frames = s.frames()
+    for f in frames[40:4400]:                              # the agent recorded nothing for 73 minutes
+        f.samples = {}
+    c = s.ctx()
+    seg, cond, inc = Segments(c), Conditions(c), Incidents(c)
+    out = []
+    for f in frames:
+        sc = seg.step(f)
+        out += inc.step(f, sc, cond.step(f, seg), seg)
+    [i] = closed(out)[:1]
+    assert sec(i.start_ms) == 30 and sec(i.end_ms) <= 41 and "long_outage" not in i.tags and "data_gap" in i.tags

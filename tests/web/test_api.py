@@ -188,3 +188,11 @@ def test_numbers_past_sqlite_integers_are_a_400_not_a_500(db):
         assert c.get(path).status_code in (400, 422), path
     r = c.post("/api/annotations", json={"start_ms": int(big), "label": "user-test"}, headers=H)
     assert r.status_code == 400
+
+
+def test_csv_text_that_a_spreadsheet_would_run_is_made_literal(tmp_path):
+    """L6 audit: a cell starting with = + - @ runs as a formula when the CSV is opened in a spreadsheet."""
+    from whydrop.web.export import render
+    rows = [{"id": 1, "kind": "=HYPERLINK(\"http://x.example\")", "note": "@SUM(1)", "neg": -5, "detail_json": "{\"a\": 1}"}]
+    body, _ = render("events", rows, "csv", False, NOW)
+    assert "'=HYPERLINK" in body and "'@SUM" in body and ",-5," in body and "\"{\"\"a\"\": 1}\"" in body

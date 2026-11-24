@@ -66,7 +66,8 @@ class Segments:
         self._stream_run = 0   # seconds in a row the stream has been bad
         self.last_recovery_ms = -1                # last lan/line recovery: DNS attempts before it don't count
         self._local_up_ms = -1                    # last wifi/link/lan recovery: a line down never starts before it
-        self._line_down_spans: deque = deque(maxlen=16)
+        self._outage_spans: deque = deque(maxlen=16)   # (down, up) of line, lan and local downs
+        self._down_from: dict[str, int] = {}
         self._dns = {c: "unknown" for c in DNS_CLASSES}
         self._dns_hist = {c: deque() for c in DNS_CLASSES}
 
@@ -128,6 +129,12 @@ class Segments:
         if lan_before == "down" and self._lan == "up":
             self.last_recovery_ms = frame.t_ms
             self._local_up_ms = max(self._local_up_ms, frame.t_ms)
+        for c in out:
+            if c.segment in LOCAL or c.segment == "lan":   # its failed sends are no lossy period for the line gate
+                if c.state == "down":
+                    self._down_from[c.segment] = c.t_ms
+                elif c.segment in self._down_from:
+                    self._outage_spans.append((self._down_from.pop(c.segment), c.t_ms))
         if frame.lag or frame.suspended:
             self._stream_run = 0
         else:
@@ -220,7 +227,7 @@ class Segments:
         start = max(start, self._local_up_ms)
         span = [x[5] for x in self._q if x[0] >= start]
         lost, late = sum(r.lost for r in span), sum(r.late for r in span)
-        in_outage = lambda u: any(a <= u < b for a, b in self._line_down_spans)  # noqa: E731
+        in_outage = lambda u: any(a <= u < b for a, b in self._outage_spans)  # noqa: E731
         hb = [x[5] for x in self._q if x[1] == "line_hb" and start - K.GATE_WINDOW_S * 1000 <= x[0] < start
               and not in_outage(x[0])]                 # a previous outage is not "a lossy period"
         sent_hb = sum(r.sent - r.local_fail for r in hb)
@@ -257,7 +264,7 @@ class Segments:
             out.append(SegmentChange(self._first_ok, "line", "up"))
             self._line = "up"
             self.last_recovery_ms = self._first_ok
-            self._line_down_spans.append((self._line_start, self._first_ok))
+            self._outage_spans.append((self._line_start, self._first_ok))
         return out
 
     # ---------- DNS ----------

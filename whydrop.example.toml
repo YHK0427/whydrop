@@ -15,6 +15,9 @@ db_path = "./whydrop-data/whydrop.db"
 
 # Probe intervals in seconds (0.5–3600)
 # [intervals]
+# host_net = 1.0
+# wifi = 1.0                             # Linux (iw)
+# wifi_windows = 2.0                     # Windows (netsh is slower)
 # gateway = 1.0
 # line_hb = 1.0
 # dns = 5.0
@@ -22,11 +25,13 @@ db_path = "./whydrop-data/whydrop.db"
 # stun = 10.0
 # tcp_connect = 2.0
 
-# Replace the public targets (e.g. to drop a provider). Each needs addr, port, kind (dns | stun | tcp443), provider.
+# Replace the public targets (e.g. to drop a provider). Each needs addr, port, kind (dns | stun | tcp443), provider;
+# proto (udp | tcp) defaults to udp.
 # [[targets]]
 # addr = "9.9.9.9"
 # port = 53
 # kind = "dns"
+# proto = "udp"
 # provider = "quad9"
 
 [web]
