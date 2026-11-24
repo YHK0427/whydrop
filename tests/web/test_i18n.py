@@ -30,8 +30,16 @@ def test_every_used_key_exists():
 def test_every_cause_text_has_korean():
     from whydrop.analysis import texts
     ko = load("causes.ko.json")
-    server = {v[0] for v in texts.CAUSES.values()} | {v[1] for v in texts.CAUSES.values()} | set(texts.R3_LABELS.values()) \
-        | {texts.IN_HOME_QUEUEING, texts.QUEUEING_TIMEOUTS, texts.IN_HOME_STEP}
+    def strings(v):   # every text in the module, so a new one can't be added without its Korean
+        if isinstance(v, str):
+            yield v
+        elif isinstance(v, (tuple, list)):
+            for x in v:
+                yield from strings(x)
+        elif isinstance(v, dict):
+            for x in v.values():
+                yield from strings(x)
+    server = {s for n, v in vars(texts).items() if n.isupper() for s in strings(v) if s}
     assert server <= set(ko), server - set(ko)
     assert all("추정" in ko[k] for k in server if "likely" in k)
 
