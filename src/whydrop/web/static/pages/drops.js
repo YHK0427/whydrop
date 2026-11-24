@@ -1,5 +1,5 @@
 // Drops (#/drops): every drop with filters by cause and segment (UI design doc §3).
-import { api, dur, errorPanel, h, parseIncident, STATIC, t, toast, when } from "../lib.js";
+import { api, dur, errorPanel, h, parseIncident, STATIC, t, when } from "../lib.js";
 
 export async function mount(main, { refresh }) {
   const q = new URLSearchParams(location.hash.split("?")[1] || "");
@@ -24,14 +24,7 @@ export async function mount(main, { refresh }) {
   };
   const empty = h("p", { class: "empty" }, t("drops.none"));
   select.addEventListener("change", draw);
-  const isp = STATIC ? null : h("button", { type: "button", onclick: async () => {   // a text file to send the ISP
-    let text;
-    try { text = await api(`/api/isp-report?lang=${document.documentElement.lang}`); }
-    catch (e) { toast(t("error.load", { what: t("drops.isp"), code: e.code || "?" })); return; }
-    const a = h("a", { href: URL.createObjectURL(new Blob([text], { type: "text/plain" })), download: "whydrop-isp-report.txt" });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  } }, t("drops.isp"));
+  const isp = STATIC ? null : h("a", { class: "btn", href: "#/isp" }, t("drops.isp"));   // the report page
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("drops.title")),
     h("div", { class: "row" }, select, isp, segment ? h("span", { class: "faint" }, `${t("drops.col.where")}: ${segment}`) : null),
     h("table", { class: "data drops-table" }, h("thead", {}, h("tr", {}, ["when", "length", "where", "cause"].map(c =>

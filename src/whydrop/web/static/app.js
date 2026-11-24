@@ -8,6 +8,7 @@ const routes = [
   { re: /^#\/nat$/, page: () => import("./pages/nat.js"), nav: "nat" },
   { re: /^#\/protocol$/, page: () => import("./pages/protocol.js"), nav: "protocol" },
   { re: /^#\/network$/, page: () => import("./pages/network.js"), nav: "network" },
+  { re: /^#\/isp$/, page: () => import("./pages/isp.js"), nav: "drops" },
 ];
 const NAV = [["now", "#/"], ["drops", "#/drops"], ["nat", "#/nat"], ["protocol", "#/protocol"], ["network", "#/network"]];
 

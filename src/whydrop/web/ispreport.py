@@ -42,16 +42,25 @@ def _stamp(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %z")
 
 
-def report(db, from_ms: int, to_ms: int, lang: str = "en") -> str:
-    w = W["ko" if lang == "ko" else "en"]
+DAY_MS = 86_400_000
+
+
+def data(db, from_ms: int, to_ms: int) -> dict:
+    """The report as numbers (language-neutral; labels stay the stored English): what the page and the text render."""
     tests = [a for a in Q.rows(db, "SELECT start_ms, end_ms, label FROM annotations WHERE start_ms < ? AND "
                                    "(end_ms IS NULL OR end_ms >= ?)", (to_ms, from_ms)) if a["label"] in TESTS]
     in_test = lambda a, b: any(t["start_ms"] <= b and (t["end_ms"] or t["start_ms"]) >= a for t in tests)
-    gaps = sum(min(g["end_ms"], to_ms) - max(g["start_ms"], from_ms) for g in Q.gaps(db, from_ms, to_ms))
+    gap_list = Q.gaps(db, from_ms, to_ms)
     first = Q.rows(db, "SELECT MIN(ts_ms) t FROM (SELECT MIN(ts_ms) ts_ms FROM samples_1m UNION ALL SELECT MIN(ts_ms) FROM samples_1s)")
     start = max(from_ms, (first[0]["t"] or to_ms) if first else to_ms)
-    events, counts, secs, home, skipped = [], {}, {}, 0, 0
-    for inc in sorted(Q.overlapping(db, "incidents", from_ms, to_ms, limit=100_000), key=lambda r: r["start_ms"]):
+
+    def recorded(a: int, b: int) -> int:   # ms in [a, b) after the first sample and outside the gaps
+        a = max(a, start)
+        if b <= a:
+            return 0
+        return b - a - sum(max(0, min(g["end_ms"], b) - max(g["start_ms"], a)) for g in gap_list)
+    events, counts, secs, home, skipped, worst = [], {}, {}, 0, 0, 0.0
+    for inc in Q.overlapping(db, "incidents", from_ms, to_ms, limit=100_000):
         end = inc["end_ms"] or to_ms
         tags, ev = json.loads(inc["tags_json"] or "{}"), json.loads(inc["evidence_json"] or "{}")
         kind = _kind(inc, tags, ev)
@@ -64,18 +73,12 @@ def report(db, from_ms: int, to_ms: int, lang: str = "en") -> str:
         counts[kind] = counts.get(kind, 0) + 1
         secs[kind] = secs.get(kind, 0) + (end - inc["start_ms"]) / 1000
         facts = {f["k"]: f for f in ev.get("facts") or []}
-        label = localized(ev.get("label", inc.get("cause_final") or ""), lang)
-        label = re.sub(r"\s*\((likely|추정)\)$", "", label)
-        line = f"{_stamp(inc['start_ms'])}  {round((end - inc['start_ms']) / 1000)}{w['s']}  {label}"
-        notes = []
-        if "unobservable" in str(inc.get("cause_final") or ""):
-            notes.append(w["unsure"])
-        if (g := facts.get("gw")) and g.get("sent"):
-            notes.append(w["router"].format(ok=g["ok"], sent=g["sent"]))
-        if (b := facts.get("line")) and b.get("sent"):
-            notes.append(w["beyond"].format(ans=b["ok"] + b["late"], sent=b["sent"], late=b["late"]))
-        events.append(line + ("\n    " + "; ".join(notes) if notes else ""))
-    worst = 0.0
+        g, b = facts.get("gw"), facts.get("line")
+        events.append({"start_ms": inc["start_ms"], "dur_s": round((end - inc["start_ms"]) / 1000), "kind": kind,
+                       "label": ev.get("label", inc.get("cause_final") or ""), "unsure": "unobservable" in str(inc.get("cause_final") or ""),
+                       "router": {"ok": g["ok"], "sent": g["sent"]} if g and g.get("sent") else None,
+                       "beyond": {"ans": b["ok"] + b["late"], "sent": b["sent"], "late": b["late"]} if b and b.get("sent") else None,
+                       "loss": None})
     for c in Q.overlapping(db, "conditions", from_ms, to_ms, limit=100_000):
         d = json.loads(c["detail_json"] or "{}")
         end = c["end_ms"] or to_ms
@@ -86,18 +89,44 @@ def report(db, from_ms: int, to_ms: int, lang: str = "en") -> str:
         worst = max(worst, d.get("loss") or 0)
         g = Q.rows(db, "SELECT SUM(sent - local_fail) sent, SUM(ok) ok FROM samples_1s WHERE agent_id = 1 AND probe = 'gateway' "
                        "AND ts_ms >= ? AND ts_ms < ?", (c["start_ms"], end))
-        home_side = ("\n    " + w["router"].format(ok=g[0]["ok"], sent=g[0]["sent"])) if g and g[0]["sent"] else ""
-        events.append(f"{_stamp(c['start_ms'])}  {round((end - c['start_ms']) / 1000)}{w['s']}  "
-                      + w["loss"].format(pct=round(100 * (d.get("loss") or 0), 1)) + home_side)
-    out = [w["title"], f"{w['period']}: {_stamp(from_ms)} – {_stamp(to_ms)}",
-           f"{w['recorded']}: {max(0, to_ms - start - gaps) / 3_600_000:.1f}{w['hours']}", ""]
+        events.append({"start_ms": c["start_ms"], "dur_s": round((end - c["start_ms"]) / 1000), "kind": "lossy",
+                       "label": d.get("label", ""), "unsure": False, "loss": d.get("loss") or 0,
+                       "router": {"ok": g[0]["ok"], "sent": g[0]["sent"]} if g and g[0]["sent"] else None, "beyond": None})
+    events.sort(key=lambda e: e["start_ms"])
+    day0 = int(datetime.fromtimestamp(from_ms / 1000).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+    days = []
+    for d0 in range(day0, to_ms, DAY_MS):   # ponytail: fixed 24 h days, a DST day is off by an hour
+        d1 = d0 + DAY_MS
+        days.append({"start_ms": d0, "recorded": round(recorded(max(d0, from_ms), min(d1, to_ms)) / DAY_MS, 3),
+                     "events": sum(1 for e in events if d0 <= e["start_ms"] < d1)})
+    return {"from_ms": from_ms, "to_ms": to_ms, "recorded_h": round(recorded(from_ms, to_ms) / 3_600_000, 1),
+            "counts": counts, "secs": {k: round(v) for k, v in secs.items()}, "worst": worst, "home": home, "tests": skipped,
+            "events": events, "days": days}
+
+
+def report(db, from_ms: int, to_ms: int, lang: str = "en") -> str:
+    w = W["ko" if lang == "ko" else "en"]
+    d = data(db, from_ms, to_ms)
+    counts, secs = d["counts"], d["secs"]
+    events = []
+    for e in d["events"]:
+        head = f"{_stamp(e['start_ms'])}  {e['dur_s']}{w['s']}  "
+        if e["kind"] == "lossy":
+            head += w["loss"].format(pct=round(100 * e["loss"], 1))
+        else:
+            head += re.sub(r"\s*\((likely|추정)\)$", "", localized(e["label"], lang))
+        notes = [w["unsure"]] if e["unsure"] else []
+        if e["router"]:
+            notes.append(w["router"].format(**e["router"]))
+        if e["beyond"]:
+            notes.append(w["beyond"].format(**e["beyond"]))
+        events.append(head + ("\n    " + "; ".join(notes) if notes else ""))
+    out = [w["title"], f"{w['period']}: {_stamp(from_ms)} – {_stamp(to_ms)}", f"{w['recorded']}: {d['recorded_h']:.1f}{w['hours']}", ""]
     for k in ("drops", "slow", "lossy", "ip", "dns"):
         if counts.get(k):
-            extra = f", {w['worst']} {round(100 * worst, 1)} %" if k == "lossy" else ""
-            out.append(f"{w[k]}: {counts[k]} ({w['total']} {round(secs[k])}{w['s']}{extra})" if k != "ip"
-                       else f"{w[k]}: {counts[k]}")
-    if home or skipped:
-        out.append(w["excluded"].format(home=home, tests=skipped))
-    out += ["", w["events"] if events else w["none"]]
-    out += sorted(events)   # each starts with its timestamp
+            extra = f", {w['worst']} {round(100 * d['worst'], 1)} %" if k == "lossy" else ""
+            out.append(f"{w[k]}: {counts[k]} ({w['total']} {secs[k]}{w['s']}{extra})" if k != "ip" else f"{w[k]}: {counts[k]}")
+    if d["home"] or d["tests"]:
+        out.append(w["excluded"].format(home=d["home"], tests=d["tests"]))
+    out += ["", w["events"] if events else w["none"], *events]
     return "\n".join(out) + "\n"

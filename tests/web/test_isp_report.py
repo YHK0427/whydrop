@@ -47,3 +47,13 @@ def test_the_isp_report_lists_line_events_with_the_home_side_and_counts_the_rest
     assert "(likely)" not in en and "Wi-Fi problem" not in en and "queueing" not in en
     ko = c.get(f"/api/isp-report?from={NOW - 3_600_000}&to={NOW}&lang=ko").text
     assert "공유기 너머 회선 끊김: 1 (합계 46초)" in ko and "공유기는 확인 46번 중 46번 응답" in ko
+
+
+def test_the_report_page_gets_the_same_events_as_numbers(tmp_path):
+    c = TestClient(create_app(_db(tmp_path), Bus(), token=None, allowed_hosts=["testserver"], public_default=False,
+                              clock=lambda: NOW))
+    d = c.get(f"/api/isp-report?from={NOW - 3_600_000}&to={NOW}&format=json").json()
+    assert d["counts"] == {"drops": 1, "lossy": 1} and d["home"] == 2 and d["tests"] == 1
+    drop = next(e for e in d["events"] if e["kind"] == "drops")
+    assert drop["router"] == {"ok": 46, "sent": 46} and drop["beyond"] == {"ans": 0, "sent": 230, "late": 0}
+    assert sum(x["events"] for x in d["days"]) == 2 and all(0 <= x["recorded"] <= 1 for x in d["days"])

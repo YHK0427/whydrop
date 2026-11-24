@@ -1,6 +1,6 @@
 [project]
 name = "whydrop"
-version = "0.5.0"
+version = "0.6.0"
 description = "Self-hosted network black box: records when, where and why your home internet dropped."
 readme = "README.md"
 license = "MIT"

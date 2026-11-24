@@ -269,6 +269,8 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
         """This month (or ?from/to) beyond the router, as text to send the ISP; absolute times, no addresses."""
         q = request.query_params
         frm, to = span(request) if q.get("from") else (_month_start(_now()), _now())
+        if q.get("format") == "json":   # the report page draws it
+            return Response(await asyncio.to_thread(lambda: _dumps(ispreport.data(db_path, frm, to))), media_type="application/json")
         lang = "ko" if q.get("lang") == "ko" else "en"
         body = await asyncio.to_thread(ispreport.report, db_path, frm, to, lang)
         return PlainTextResponse(body, headers={"content-disposition": 'attachment; filename="whydrop-isp-report.txt"'})
