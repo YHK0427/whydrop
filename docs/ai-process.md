@@ -123,4 +123,4 @@ What the agent got wrong and caught on real data or in review:
 - It claimed `host:abc` as a reflector address crashed precision start-up; an existing test showed it was already handled (precision off with the reason). The config check was moved back to that path.
 - Its first alert-rate cap counted failed sends and let retries bypass the cap; a review found both.
 - Several flaky tests were not timing luck: Hyper-V reserves blocks of 100 TCP and UDP ports inside the Windows dynamic range and moves them, so a test that bound a UDP port and then the same TCP number failed in bursts.
-- A memory rise on the home server (40 → 54 MiB over 40 h) was measured with tracemalloc before any change, rather than guessed at.
+- A memory rise on the home server (40 → 54 MiB over 40 h) was measured with tracemalloc before any change, rather than guessed at: after warm-up the heap grew about 80 KiB in 20 minutes; the rise is the 1-hour signal window and the 24-hour RTT baselines filling, not a leak.
