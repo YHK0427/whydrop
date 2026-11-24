@@ -12,7 +12,7 @@ Every probe is small and timed by when it was **sent**, so a reply that comes ba
 |---|---|---|---|
 | Router check | TCP SYN to a closed port (RST = alive); ICMP echo on Windows | 1 s | Is the router reachable from this device? |
 | Line heartbeat | UDP: STUN binding requests and a DNS query, rotating across providers | 1 s | Does a packet get through the internet line and back? |
-| DNS | UDP and TCP queries to the router, the ISP's resolvers and public resolvers | 5 s | Which DNS layer answers? |
+| DNS | UDP and TCP queries to the router, the ISP's resolvers and public resolvers | 5 s (public resolvers 10 s in precision mode) | Which DNS layer answers? |
 | STUN | UDP, two providers | 10 s | What is my public IP and mapped port? |
 | TCP connect | TCP handshake to port 443 of large public services | 2 s | Does a full TCP handshake complete, and how long does it take? |
 | Wi-Fi / link | the OS (`iw`, `netsh`, `/sys`) | 1–2 s | Associated? Which access point? Signal? Carrier? |

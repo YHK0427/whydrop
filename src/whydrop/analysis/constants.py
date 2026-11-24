@@ -47,6 +47,7 @@ DEGRADED_AFTER_S = 30
 MERGE_AFTER_END_S = 10
 MERGE_AFTER_LOCAL_S = 120
 LONG_OUTAGE_S = 3600
+DATA_GAP_S = 60                  # no probe reported for longer (agent stopped, clock stepped): an open drop ends there
 SETTLE_S = 80
 
 # causes (§6.4)

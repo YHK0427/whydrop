@@ -51,6 +51,7 @@ class Incidents:
         self._pending: list[tuple[int, str, Event]] = []  # (decide at, kind, event)
         self._local_up: dict[str, int] = {}
         self._idle_seen: set[int] = set()
+        self._last_data: int | None = None              # the last second any probe reported
 
     # ---------- helpers ----------
     def _open(self, inc: Incident, out: list) -> None:
@@ -84,6 +85,13 @@ class Incidents:
             inc.tags.add("agent_restarted")
             self._close(inc, t, out)
         self._reopen = []
+        if frame.suspended or frame.lag:
+            self._last_data = t                          # a sleep or a stall has its own handling, not a gap
+        elif frame.samples:
+            if self.current is not None and self._last_data is not None and t - self._last_data > K.DATA_GAP_S * 1000:
+                self.current.tags.add("data_gap")        # nothing was observed in between: don't stretch the drop over it
+                self._close(self.current, self._last_data + 1000, out)
+            self._last_data = t
 
         for e in frame.events:
             self._recent.append(e)
