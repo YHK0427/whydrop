@@ -4,6 +4,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+
 ### Added
 - "Why this verdict" on every drop: the measurements the cause rests on (router RTT usual vs. peak and timeouts, replies from beyond the router on time / late / lost, upload vs. download loss, TCP retransmissions, RTO and RST, Wi-Fi events, IP change, failed DNS classes) and the causes they rule out. The headline no longer ends in "(likely)" when it has them; the copied summary lists them too. `replay --write` adds them to past drops.
 
