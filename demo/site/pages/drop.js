@@ -24,17 +24,19 @@ function showText(main, text) {
   box.focus(); box.select();
 }
 
+const word = (v) => { const k = `evv.${v}`, w = t(k); return w === k ? String(v) : w; };   // "upload" → "업로드"; codes stay
+
 function frozenPath(d, link) {
-  const down = new Set(d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
-  const first = ORDER.findIndex(s => down.has(s));
+  const down = new Set(d.home ? ["wifi"] : d.raw.map(s => (s.startsWith("dns") ? "dns" : s === "link" ? "wifi" : s)));
+  const first = d.slow ? -1 : ORDER.findIndex(s => down.has(s));   // a slow hop doesn't hide the ones after it
   return ORDER.map((k, i) => ({ key: k, label: k === "wifi" && link === "wired" ? t("seg.link") : t(`seg.${k}`),
-    ui: down.has(k) ? "down" : first >= 0 && i > first ? "not_checked" : "ok" }));
+    ui: down.has(k) ? (d.slow ? "unstable" : "down") : first >= 0 && i > first ? "not_checked" : "ok" }));
 }
 
 async function download(path, name) {
   const headers = token() ? { Authorization: `Bearer ${token()}` } : {};
   const r = await fetch(path, { headers });
-  if (!r.ok) { toast(t("error.load", { what: name, code: r.status })); return; }
+  if (!r.ok) { toast(t("error.load", { what: t("what.bugreport"), code: r.status })); return; }
   const url = URL.createObjectURL(await r.blob());
   const a = h("a", { href: url, download: name });
   document.body.append(a); a.click(); a.remove();
@@ -74,7 +76,7 @@ export async function mount(main, { id, refresh }) {
   } catch (e) { main.replaceChildren(errorPanel(e, refresh)); return; }
 
   const durS = d.end ? (d.end - d.start) / 1000 : (Date.now() - d.start) / 1000;
-  const headline = d.segs.length ? t("drop.headline", { seg: d.segs[0], dur: dur(durS), cause: d.label })
+  const headline = d.segs.length ? t(d.slow ? "drop.headline_slow" : "drop.headline", { seg: d.segs[0], dur: dur(durS), cause: d.label })
     : t("drop.headline_point", { cause: d.label });
   const label = ann.find(a => a.label === "reproduced" || a.label === "injected" || a.label === "user-test");
 
@@ -82,7 +84,7 @@ export async function mount(main, { id, refresh }) {
     h("button", { class: "btn", type: "button", onclick: async () => {
       let text;
       try { text = await api(`/api/incidents/${id}/summary?lang=${document.documentElement.lang}`); }
-      catch (e) { toast(t("error.load", { what: "summary", code: e.code || "?" })); return; }
+      catch (e) { toast(t("error.load", { what: t("what.summary"), code: e.code || "?" })); return; }
       if (await copyText(text)) toast(t("drop.copied"));
       else showText(main, text);   // http://<LAN IP> is not a secure context: no clipboard API there
     } }, t("drop.copy")),
@@ -95,7 +97,7 @@ export async function mount(main, { id, refresh }) {
       t("drop.wrong")));
 
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);   // cause_X repeats the incident's own X
-  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "events"].includes(k)
+  const evRows = Object.entries(d.evidence).filter(([k, v]) => !["label", "next_step", "protocol", "protocol_ko", "events", "cause_where"].includes(k)
     && !(k.startsWith("cause_") && same(d.evidence[k.slice(6)], v)));
   const lanesEl = lanes(series(samples, st?.mode || "basic"), { stepS: samples.step_s, mode: st?.mode || "basic", baseline: "ready",
     events: events.filter(e => e.kind === "rst") });
@@ -116,7 +118,7 @@ export async function mount(main, { id, refresh }) {
     h("section", { class: "panel split" },
       h("div", {}, h("h2", {}, t("drop.evidence")), evRows.length ? h("dl", { class: "kv" },
         evRows.flatMap(([k, v]) => [h("dt", {}, t(`ev.${k}`) === `ev.${k}` ? k : t(`ev.${k}`)),
-          h("dd", {}, Array.isArray(v) ? v.join(", ") || "–" : String(v))])) : h("p", { class: "faint" }, "–")),
+          h("dd", {}, Array.isArray(v) ? v.map(word).join(", ") || "–" : word(v))])) : h("p", { class: "faint" }, "–")),
       h("div", {}, h("h2", {}, t("drop.history")),
         h("p", {}, d.changed ? t("drop.changed", { rule: d.provisional || "?" }) : t("drop.unchanged")),
         h("h2", {}, t("drop.annotations")), ann.length ? h("ul", { class: "drops" }, ann.map(a => h("li", {},

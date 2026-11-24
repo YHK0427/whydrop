@@ -1,0 +1,1 @@
+"Drop: 19 min ago, 0 s, idle_state_lost\nLikely cause: NAT/firewall state expired (likely)\nWhat to do next: The idle interval is longer than the measured NAT timeout: set keepalive below it\nRecorded by whydrop (rule R5)"

@@ -8,20 +8,24 @@ function bracket(rows) {
   return [ok.length ? Math.max(...ok) : null, hi];
 }
 
-function chart(byProto) {   // step lines of survival vs delay, log x axis, direct labels (light aqua < 3:1)
-  const W = 640, H = 200, L = 60, R = 70, T = 16, B = 34;
+function chart(byProto, W) {   // step lines of survival vs delay, log x axis, direct labels (light aqua < 3:1); W = drawn px, so 12 px text stays 12 px on a phone
+  const H = 200, L = 60, R = 70, T = 16, B = 34;
   const all = Object.values(byProto).flat().map(r => r.delay_s);
   if (!all.length) return null;
   const lx = (v) => L + (Math.log10(v) - 1) / (Math.log10(Math.max(...all, 600)) - 1) * (W - L - R);
   const ly = (alive) => (alive ? T + 20 : H - B - 10);
   const root = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": t("nat.title") });
   root.append(svg("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "var(--rule)" }));
+  let lastTick = -Infinity;
   for (const tick of [10, 30, 60, 300, 600, 1800, 3600]) {
     if (tick > Math.max(...all) * 1.5) break;
+    if (lx(tick) - lastTick < 44) continue;   // a phone has no room for every tick label
+    lastTick = lx(tick);
     root.append(svg("text", { x: lx(tick), y: H - 12, "text-anchor": "middle", fill: "var(--ink-3)", "font-size": 12 }, `${tick} s`));
   }
   root.append(svg("text", { x: 8, y: ly(1) + 4, fill: "var(--ink-3)", "font-size": 12 }, t("nat.alive")),
     svg("text", { x: 8, y: ly(0) + 4, fill: "var(--ink-3)", "font-size": 12 }, t("nat.forgotten")));
+  const ends = Object.fromEntries(Object.entries(byProto).map(([p, rows]) => [p, rows.reduce((a, r) => (!a || r.delay_s > a.delay_s ? r : a), null)]));
   for (const [proto, rows] of Object.entries(byProto)) {
     const color = proto === "udp" ? "var(--udp)" : "var(--tcp)";
     const pts = rows.slice().sort((a, b) => a.delay_s - b.delay_s);
@@ -31,7 +35,11 @@ function chart(byProto) {   // step lines of survival vs delay, log x axis, dire
     for (const r of pts) root.append(svg("circle", { cx: lx(r.delay_s), cy: r.alive == null ? (ly(1) + ly(0)) / 2 : ly(r.alive), r: 5,
       fill: r.alive == null ? "var(--surface)" : color, stroke: color, "stroke-width": 2 }));
     const last = pts[pts.length - 1];
-    if (last) root.append(svg("text", { x: lx(last.delay_s) + 10, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + 4,
+    const mine = ends[proto], level = (r) => (r.alive == null ? null : !!r.alive);
+    const passed = Object.entries(ends).some(([p, e]) => p !== proto && e && mine && level(e) === level(mine)
+      && (e.delay_s > mine.delay_s || (e.delay_s === mine.delay_s && p < proto)));
+    const off = passed ? -9 : 4;   // another line runs on past this end at its level: label above it, else beside the end
+    if (last) root.append(svg("text", { x: lx(last.delay_s) + 6, y: (last.alive == null ? (ly(1) + ly(0)) / 2 : ly(last.alive)) + off,
       fill: "var(--ink)", "font-size": 13, "font-weight": 600 }, proto.toUpperCase()));
   }
   return root;
@@ -57,7 +65,7 @@ export async function mount(main, { refresh }) {
   const running = nat.running;
   const btn = isPublic ? null : h("button", { class: "btn primary", type: "button", disabled: running ? true : null, onclick: async () => {
     try { await api("/api/nat/run", { method: "POST" }); refresh(); }
-    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: "nat", code: e.code })); }
+    catch (e) { toast(e.code === 409 ? t("nat.already") : e.code === 400 ? t("nat.needs_precision") : t("error.load", { what: t("what.nat"), code: e.code })); }
   } }, t("nat.run"));
   const progress = running ? h("p", { class: "muted", "aria-live": "polite" }, t("nat.running", {
     proto: (running.last?.proto || "udp").toUpperCase(), delay: running.last?.delay_s ?? "…", done: running.done, total: running.total })) : null;
@@ -65,7 +73,7 @@ export async function mount(main, { refresh }) {
     h("td", {}, r.alive == null ? t("nat.inconclusive") : r.alive ? t("nat.alive") : t("nat.forgotten"))));
   main.replaceChildren(h("section", { class: "panel" }, h("h1", { class: "headline" }, t("nat.title")),
     ...(hero.length ? hero : [h("p", { class: "empty" }, t("nat.none"))]), h("div", { class: "row" }, btn, progress)),
-    ...(rows.length ? [h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by)),
+    ...(rows.length ? [h("section", { class: "panel" }, h("div", { class: "natchart" }, chart(by, Math.min(640, Math.max(300, main.clientWidth - 32)))),
       h("table", { class: "data" }, h("tbody", {}, tableRows)))] : []));   // replaceChildren(null) prints "null"
   const poll = running ? setTimeout(() => location.hash === "#/nat" && refresh(), 5000) : null;
   return () => clearTimeout(poll);

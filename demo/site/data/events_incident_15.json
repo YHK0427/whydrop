@@ -1,0 +1,1 @@
+[{"kind":"agent_lag","t_s":-246884,"pair":null,"detail":{"phase":"start","lag_ms":459}},{"kind":"agent_lag","t_s":-246883,"pair":null,"detail":{"phase":"end","max_lag_ms":459}}]
