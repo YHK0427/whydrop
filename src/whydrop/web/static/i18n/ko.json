@@ -208,5 +208,6 @@
   "ruled.line_late": "회선 단절 아님: 공유기 너머 프로브 {sent}개 중 {answered}개가 응답, 그중 {late}개는 늦게",
   "ruled.dns": "DNS 문제 아님: resolver가 {ok}번 응답",
   "ruled.ip": "IP 변경 아님: 공인 IP 그대로",
-  "ruled.local": "이 기기·연결 문제 아님: 계속 정상"
+  "ruled.local": "이 기기·연결 문제 아님: 계속 정상",
+  "drops.isp": "통신사 제출용 보고서 (이번 달)"
 }

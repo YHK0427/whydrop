@@ -16,6 +16,7 @@ from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from whydrop.web import export as X
+from whydrop.web import ispreport
 from whydrop.web import metrics as M
 from whydrop.web import queries as Q
 from whydrop.web.bus import Bus
@@ -262,6 +263,15 @@ def create_app(db_path, bus: Bus, *, token: str | None, allowed_hosts: list[str]
             raise HTTPException(404, "no such drop")
         return Response(body, media_type="application/json",
                         headers={"content-disposition": f'attachment; filename="whydrop-bugreport-{iid}.json"'})
+
+    @app.get("/api/isp-report")
+    async def get_isp_report(request: Request):
+        """This month (or ?from/to) beyond the router, as text to send the ISP; absolute times, no addresses."""
+        q = request.query_params
+        frm, to = span(request) if q.get("from") else (_month_start(_now()), _now())
+        lang = "ko" if q.get("lang") == "ko" else "en"
+        body = await asyncio.to_thread(ispreport.report, db_path, frm, to, lang)
+        return PlainTextResponse(body, headers={"content-disposition": 'attachment; filename="whydrop-isp-report.txt"'})
 
     @app.get("/api/export/{name}.{fmt}")
     async def get_export(name: str, fmt: str, request: Request):

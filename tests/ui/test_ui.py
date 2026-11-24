@@ -662,3 +662,17 @@ def test_a_verdict_shows_its_measurements_instead_of_likely(browser, base, lang,
     assert "(추정)" not in head and "(likely)" not in head
     assert seen in why and ruled in why and ("RST 없음" in why if lang == "ko" else "no RST" in why)
     assert not re.search(r"\b(fact|ruled|why)\.[a-z_]+", main), main
+
+
+@pytest.mark.parametrize("lang,label,head", [("ko", "통신사 제출용 보고서 (이번 달)", "인터넷 회선 보고서"), ("en", "ISP report (this month)", "Internet line report")])
+def test_the_drops_page_downloads_the_isp_report(browser, base, lang, label, head):
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900}, accept_downloads=True)
+    ctx.add_init_script(f"localStorage.setItem('whydrop.lang','{lang}')")
+    page = ctx.new_page()
+    page.goto(f"{base}/#/drops")
+    page.wait_for_load_state("networkidle")
+    with page.expect_download() as d:
+        page.get_by_role("button", name=label).click()
+    text = open(d.value.path(), encoding="utf-8").read()
+    ctx.close()
+    assert d.value.suggested_filename == "whydrop-isp-report.txt" and text.startswith(head)
