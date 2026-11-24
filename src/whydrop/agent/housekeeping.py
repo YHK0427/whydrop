@@ -6,7 +6,8 @@ log = logging.getLogger(__name__)
 
 DAY_MS = 86_400_000
 KEEP_1S_MS = 7 * DAY_MS
-KEEP_INCIDENT_MS = 90 * DAY_MS
+KEEP_INCIDENT_MS = 90 * DAY_MS   # incident detail: its seconds, the packet strip and events
+KEEP_1M_MS = 365 * DAY_MS        # minute rows: about 36 k a day; incidents and conditions are small and stay
 INCIDENT_PAD_MS = 10 * 60_000
 GB = 2**30
 ROLLUP_LAG_MS = 5 * 60_000   # late replies still update 1 s rows for a few seconds: roll up well behind them
@@ -77,4 +78,6 @@ async def housekeep(store, now_ms: int, *, free_bytes=None, min_free_mb: int | N
             break
         deleted += n
         chunks += 1
+    for table, keep in (("udp_seq_ring", KEEP_INCIDENT_MS), ("events", KEEP_INCIDENT_MS), ("samples_1m", KEEP_1M_MS)):
+        await store.execute_rowcount(f"DELETE FROM {table} WHERE agent_id = ? AND ts_ms < ?", (store.agent_id, now_ms - keep))
     return {"disk_full": disk_full, "deleted_1s": deleted, "chunks": chunks}
