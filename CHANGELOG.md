@@ -4,6 +4,8 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-25
+
 ### Changed
 - `export-static` includes the ISP report, so the public demo opens the report page too (Save as PDF works there; the text download needs a live agent).
 
