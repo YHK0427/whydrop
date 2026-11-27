@@ -4,6 +4,9 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+### Added
+- docs/usage: a step-by-step guide with real screenshots, every screen and command, including precision mode on one laptop (reflector and agent over loopback) to watch the protocol.
+
 ## [0.6.2] - 2026-11-27
 
 ### Added
