@@ -2,7 +2,7 @@
 
 # Is it your Wi-Fi, your router, or your ISP — and what happened to the packets?
 
-[![ci](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml/badge.svg)](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11–3.13-blue)
+[![ci](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml/badge.svg)](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11–3.14-blue)
 
 whydrop is a self-hosted black box for a home connection. It probes every second over TCP and UDP, so it is built to catch even 3-second drops, and for each drop it tells you **where** on the path it broke, the **cause**, the **measurements that back it** and the causes they rule out, and what TCP and UDP did meanwhile.
 
@@ -27,6 +27,29 @@ Other verdicts: a line drop in the ISP segment, Wi-Fi, the cable, the router, a 
 **[Live demo](https://yhk0427.github.io/whydrop/)**: the dashboard's public view over three days of real recordings, with faults injected on purpose (read-only, times relative to the recording).
 
 ## Quick start
+
+**On a laptop or desktop (Windows, Linux; no Docker).** Needs Git and Python 3.11 to 3.14.
+
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/YHK0427/whydrop; cd whydrop
+py -m venv .venv
+.venv\Scripts\pip install ".[web]"
+.venv\Scripts\whydrop agent
+```
+
+Linux:
+
+```sh
+git clone https://github.com/YHK0427/whydrop && cd whydrop
+python3 -m venv .venv && .venv/bin/pip install '.[web]'
+.venv/bin/whydrop agent
+```
+
+Open <http://127.0.0.1:8790/> on the same machine (no token needed there). To see it work, press **Start a 2-minute test** and turn Wi-Fi off for about 10 seconds: the drop and its verdict show up on the dashboard. Ctrl+C stops it; the recording stays in `./whydrop-data`. macOS hasn't been tried yet.
+
+**On an always-on Linux server (Docker).** This is where whydrop is meant to live, watching the connection around the clock. Docker Desktop on Windows/macOS and WSL are refused on purpose (they would measure their VM's network, not yours); use the steps above there.
 
 ```sh
 git clone https://github.com/YHK0427/whydrop && cd whydrop
