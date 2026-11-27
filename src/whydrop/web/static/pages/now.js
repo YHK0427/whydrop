@@ -76,7 +76,13 @@ export async function mount(main, { refresh }) {
   let lastNode = lastDrop(drops, st);
   const head = h("section", { class: "panel" }, ...banners(findings, st), sentence, lastNode,
     pathDiagram(hops(st, roughSegs), { onPick: picked, vertical }));
-  const swapLast = (s) => { const n = lastDrop(drops, s); lastNode.replaceWith(n); lastNode = n; };
+  const swapIn = (old, fresh) => {   // replace a block; if it held the focus, put it back on the same link
+    const a = document.activeElement, had = old.contains(a), href = had && a.getAttribute("href");
+    old.replaceWith(fresh);
+    if (had) (href && fresh.querySelector(`[href="${href}"]`))?.focus();
+    return fresh;
+  };
+  const swapLast = (s) => { lastNode = swapIn(lastNode, lastDrop(drops, s)); };
 
   const rangeRow = h("div", { class: "ranges", role: "group", "aria-label": t("range.1h") },
     RANGES.map(([k, s]) => h("button", { type: "button", "aria-pressed": String(s === range),
@@ -126,7 +132,7 @@ export async function mount(main, { refresh }) {
   let listsNode = lists();
   main.replaceChildren(head, charts, listsNode);
 
-  let timer = null;
+  let timer = null, lastSig = JSON.stringify([incs, conds, anns]);   // what the page was built from
   const onMsg = (msg) => {
     if (!["incident", "segment", "condition", "finding", "resync"].includes(msg.type)) return;
     clearTimeout(timer);
@@ -135,6 +141,9 @@ export async function mount(main, { refresh }) {
       const now = Date.now();
       const [list, c2] = await Promise.all([api(`/api/incidents?from=${now - 30 * 86400000}`), api(`/api/conditions?from=${now - range * 1000}`)]);
       anns = await api(`/api/annotations?from=${now - range * 1000}&to=${now}`).catch(() => anns);
+      const sig = JSON.stringify([list, c2, anns]);
+      const changed = sig !== lastSig;
+      lastSig = sig;
       drops = list.map(parseIncident).sort((a, b) => b.start - a.start);
       conds = c2;
       open = drops.find(d => d.open && d.segs.length);
@@ -142,10 +151,10 @@ export async function mount(main, { refresh }) {
       sentence.textContent = statusSentence(s2, open, roughNow);
       const node = pathDiagram(hops(s2, roughSegs), { onPick: picked, vertical });
       head.querySelector(".path")?.replaceWith(node);
-      swapLast(s2);
-      const l2 = lists();
-      listsNode.replaceWith(l2);
-      listsNode = l2;
+      if (changed) {   // rebuilding unchanged lists would only move the keyboard focus
+        swapLast(s2);
+        listsNode = swapIn(listsNode, lists());
+      }
     }, 800);
   };
   live.listeners.add(onMsg);

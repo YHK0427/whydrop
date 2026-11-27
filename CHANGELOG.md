@@ -4,6 +4,11 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-27
+
+### Fixed
+- Now page: a live update rebuilt the drop lists even when nothing had changed, which could take the keyboard focus off a link mid-Tab. It rebuilds only on a real change and keeps the focus on the same link.
+
 ### Added
 - docs/usage: a step-by-step guide with real screenshots, every screen and command, including precision mode on one laptop (reflector and agent over loopback) to watch the protocol.
 
