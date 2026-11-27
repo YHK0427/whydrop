@@ -706,3 +706,17 @@ def test_now_page_shows_a_new_drop_without_reload(browser, base):
     ctx.close()
     assert before == 0 and after > 0, (before, after)
     assert "No drops recorded yet" not in text
+
+
+def test_a_live_update_keeps_the_keyboard_focus(browser, base):
+    """The WebSocket sends a resync right after the page connects; the Now page redrew the path and the lists from
+    it, so whatever the keyboard was on was replaced mid-Tab (CI's keyboard check failed on it now and then)."""
+    ctx, page, _ = open_page(browser, base, "#/")
+    page.focus("g.node")
+    before = page.evaluate("() => document.activeElement.getAttribute('aria-label')")
+    page.evaluate("async () => { const m = await import(new URL('app.js', location.href).href);"
+                  " m.live.listeners.forEach(f => f({ type: 'resync' })); }")
+    page.wait_for_timeout(1500)
+    after = page.evaluate("() => { const e = document.activeElement; return e.isConnected && e.getAttribute('aria-label'); }")
+    ctx.close()
+    assert before and after == before, (before, after)

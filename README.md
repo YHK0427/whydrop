@@ -28,6 +28,8 @@ Other verdicts: a line drop in the ISP segment, Wi-Fi, the cable, the router, a 
 
 ## Quick start
 
+**New here? [The step-by-step guide](https://github.com/YHK0427/whydrop/blob/main/docs/usage.md)** walks through every screen with real screenshots: install, cause a drop on purpose, read the verdict, and run precision mode on one laptop to watch the TCP/UDP protocol.
+
 **On a laptop or desktop (Windows, Linux; no Docker).** Needs Git and Python 3.11 to 3.14.
 
 Windows (PowerShell):

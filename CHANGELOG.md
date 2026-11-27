@@ -4,6 +4,14 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-27
+
+### Fixed
+- Now page: a live update (including the resync sent right after the page connects) redrew the path and the drop lists even when nothing had changed, which took the keyboard focus off the control it was on. They are redrawn only on a real change, and the focus goes back to the same control.
+
+### Added
+- docs/usage: a step-by-step guide with real screenshots, every screen and command, including precision mode on one laptop (reflector and agent over loopback) to watch the protocol.
+
 ## [0.6.2] - 2026-11-27
 
 ### Added

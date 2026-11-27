@@ -28,6 +28,8 @@ whydrop은 집 인터넷을 위한 셀프호스트 블랙박스예요. TCP와 UD
 
 ## 빠른 시작
 
+**처음이라면 단계별 사용법부터 보세요:** [docs/usage.ko.md](https://github.com/YHK0427/whydrop/blob/main/docs/usage.ko.md). 실제 스크린샷으로 화면마다 설명해요. 설치, 일부러 끊김 만들기, 판정 읽기, 노트북 한 대로 정밀 모드를 켜서 TCP/UDP 프로토콜 보기까지요.
+
 **노트북·데스크톱에서 (Windows, Linux, Docker 없이).** Git과 Python 3.11~3.14가 필요해요.
 
 Windows (PowerShell):
