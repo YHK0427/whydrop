@@ -683,3 +683,26 @@ def test_the_isp_report_page_opens_from_drops_and_downloads_as_text(browser, bas
     ctx.close()
     assert head == title and not errors and not re.search(r"\b(isp|drops)\.[a-z_.]+", body), body
     assert d.value.suggested_filename == "whydrop-isp-report.txt" and got.startswith(title.split()[0])
+
+
+def test_now_page_shows_a_new_drop_without_reload(browser, base):
+    """A Wi-Fi-off test on a laptop: the drop was stored and announced over the WebSocket, but the Now page kept saying
+    'No drops recorded yet' and listed nothing until a reload."""
+    hide = {"on": True}
+
+    def incidents(route):
+        if hide["on"]:
+            route.fulfill(content_type="application/json", body="[]")
+        else:
+            route.continue_()
+    ctx, page, _ = open_page(browser, base, "#/", setup=lambda p: p.route(re.compile(r".*/api/incidents\?.*"), incidents))
+    before = page.locator('main a[href^="#/drop/"]').count()
+    hide["on"] = False
+    page.evaluate("async () => { const m = await import(new URL('app.js', location.href).href);"
+                  " m.live.listeners.forEach(f => f({ type: 'incident' })); }")
+    page.wait_for_timeout(1500)
+    after = page.locator('main a[href^="#/drop/"]').count()
+    text = page.inner_text("main")
+    ctx.close()
+    assert before == 0 and after > 0, (before, after)
+    assert "No drops recorded yet" not in text

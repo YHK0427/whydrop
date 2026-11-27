@@ -9,6 +9,13 @@ from pathlib import Path
 from whydrop import __version__
 
 
+def quiet_resets(loop, context) -> None:
+    """Windows' proactor logs a full traceback when a browser tab closes the dashboard's socket; that's not an error."""
+    if isinstance(context.get("exception"), ConnectionResetError):
+        return
+    loop.default_exception_handler(context)
+
+
 def _reflector(args: argparse.Namespace) -> int:
     from whydrop.proto.mac import SecretError
     from whydrop.reflector.server import run_reflector
@@ -54,6 +61,8 @@ def _agent(args: argparse.Namespace) -> int:
         if sys.platform != "win32":
             for sig in (signal.SIGINT, signal.SIGTERM):
                 asyncio.get_running_loop().add_signal_handler(sig, stop.set)
+        else:
+            asyncio.get_running_loop().set_exception_handler(quiet_resets)
         await run_agent(cfg, stop=stop)
 
     try:

@@ -324,6 +324,8 @@ class Agent:
         """Wi-Fi or wired link, whichever the current interface is (re-read every tick, so starting
         before DHCP or switching networks still gets recorded)."""
         key = self.link_layer()
+        if key is None and self.env and not self.env.iface:
+            key = self._ll_key   # no route at all (e.g. Wi-Fi switched off): keep watching the same adapter
         if key != self._ll_key:
             self._ll_key = key
             self.wifi_src = self.link_tracker = None
