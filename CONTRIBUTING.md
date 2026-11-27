@@ -14,7 +14,7 @@ uv run playwright install chromium && uv run pytest -q -m ui tests/ui   # the da
 uv run whydrop agent                              # basic mode on this machine
 ```
 
-Python 3.11–3.13. The agent, the probes and the reflector use the standard library only; the dashboard adds FastAPI. Please keep it that way — a new runtime dependency needs a strong reason.
+Python 3.11–3.14. The agent, the probes and the reflector use the standard library only; the dashboard adds FastAPI. Please keep it that way — a new runtime dependency needs a strong reason.
 
 ## Changing a rule
 

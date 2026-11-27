@@ -8,7 +8,7 @@ The reflector is what turns on precision mode: upload/download separation, the T
 
 - A Linux machine **outside your home network** with a public IPv4 address: any VPS, or a free-tier VM from a cloud provider. Pick a region close to you; the round trip to it becomes the baseline of every precision measurement.
 - Inbound UDP **and** TCP 48100 allowed, both in the provider's firewall (security group / security list) and on the machine itself.
-- Docker, or Python 3.11–3.13.
+- Docker, or Python 3.11–3.14.
 
 One reflector and one secret can serve several agents.
 

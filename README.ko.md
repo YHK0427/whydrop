@@ -2,7 +2,7 @@
 
 # 와이파이 탓일까, 공유기 탓일까, 통신사 탓일까 — 그리고 패킷에는 무슨 일이 있었을까?
 
-[![ci](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml/badge.svg)](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11–3.13-blue)
+[![ci](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml/badge.svg)](https://github.com/YHK0427/whydrop/actions/workflows/ci.yml) ![license](https://img.shields.io/badge/license-MIT-blue) ![python](https://img.shields.io/badge/python-3.11–3.14-blue)
 
 whydrop은 집 인터넷을 위한 셀프호스트 블랙박스예요. TCP와 UDP로 1초마다 확인하기 때문에 3초짜리 끊김도 잡도록 만들었고, 끊길 때마다 경로의 **어디서** 끊겼는지, **원인**과 그 **판단 근거가 된 측정값**, 그 측정으로 배제한 원인, 그동안 TCP와 UDP가 무엇을 했는지 알려 줘요.
 
@@ -27,6 +27,29 @@ whydrop은 집 인터넷을 위한 셀프호스트 블랙박스예요. TCP와 UD
 **[라이브 데모](https://yhk0427.github.io/whydrop/)**: 실제로 사흘 동안 기록하고 일부러 장애를 넣은 데이터를 대시보드 공개 보기로 보여 줘요(읽기 전용, 시간은 기록 시점 기준).
 
 ## 빠른 시작
+
+**노트북·데스크톱에서 (Windows, Linux, Docker 없이).** Git과 Python 3.11~3.14가 필요해요.
+
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/YHK0427/whydrop; cd whydrop
+py -m venv .venv
+.venv\Scripts\pip install ".[web]"
+.venv\Scripts\whydrop agent
+```
+
+Linux:
+
+```sh
+git clone https://github.com/YHK0427/whydrop && cd whydrop
+python3 -m venv .venv && .venv/bin/pip install '.[web]'
+.venv/bin/whydrop agent
+```
+
+같은 컴퓨터에서 <http://127.0.0.1:8790/>을 여세요(이 컴퓨터에서는 토큰이 필요 없어요). 동작을 보려면 **2분 테스트 시작**을 누르고 와이파이를 10초쯤 꺼 보세요. 끊김과 그 판정이 대시보드에 나타나요. Ctrl+C로 멈추고, 기록은 `./whydrop-data`에 남아요. macOS에서는 아직 돌려 보지 않았어요.
+
+**늘 켜진 Linux 서버에서 (Docker).** whydrop이 원래 사는 곳이에요. 연결을 24시간 지켜봐요. Windows/macOS의 Docker Desktop과 WSL에서는 일부러 시작하지 않아요(내 네트워크가 아니라 VM의 네트워크를 재게 되니까요). 거기서는 위 방법을 쓰세요.
 
 ```sh
 git clone https://github.com/YHK0427/whydrop && cd whydrop

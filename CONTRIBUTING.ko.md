@@ -14,7 +14,7 @@ uv run playwright install chromium && uv run pytest -q -m ui tests/ui   # 실제
 uv run whydrop agent                              # 이 기기에서 기본 모드
 ```
 
-Python 3.11~3.13. agent, 프로브, reflector는 표준 라이브러리만 쓰고, 대시보드만 FastAPI를 더해요. 계속 그렇게 유지해 주세요. 새 런타임 의존성에는 확실한 이유가 필요해요.
+Python 3.11~3.14. agent, 프로브, reflector는 표준 라이브러리만 쓰고, 대시보드만 FastAPI를 더해요. 계속 그렇게 유지해 주세요. 새 런타임 의존성에는 확실한 이유가 필요해요.
 
 ## 규칙 바꾸기
 
