@@ -4,6 +4,17 @@ All notable changes. The format follows [Keep a Changelog](https://keepachangelo
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-27
+
+### Added
+- README: run it on a laptop or desktop without Docker (Windows and Linux), with the dashboard on http://127.0.0.1:8790/. Docker stays the way to run it on an always-on Linux server.
+- Python 3.14 is supported and tested in CI.
+
+### Fixed
+- Turning Wi-Fi off on Windows was reported as "Host network configuration lost": the default route vanished first, and the agent stopped watching the Wi-Fi adapter along with it, so the Wi-Fi going down was never recorded. It keeps watching the same adapter while there is no route, and the drop is now a Wi-Fi problem.
+- The Now page showed a new drop only after a reload: the last-drop line and the drop and rough-patch lists were built once. They update when a drop or patch arrives, and "Recording for …" keeps counting.
+- Windows: closing a dashboard tab no longer prints a ConnectionResetError traceback in the agent's terminal.
+
 ## [0.6.1] - 2026-11-25
 
 ### Changed

@@ -64,7 +64,7 @@ export async function mount(main, { refresh }) {
     main.replaceChildren(errorPanel(e, refresh));
     return;
   }
-  const drops = incs.map(parseIncident).sort((a, b) => b.start - a.start);
+  let drops = incs.map(parseIncident).sort((a, b) => b.start - a.start);
   let open = drops.find(d => d.open && d.segs.length);
   let roughNow = conds.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
   const roughSegs = new Set(conds.filter(c => (c.end_ms ?? c.end_s) == null)
@@ -73,8 +73,10 @@ export async function mount(main, { refresh }) {
 
   const sentence = h("h1", { class: "status", "aria-live": "polite" }, statusSentence(st, open, roughNow));
   const picked = (seg) => { location.hash = `#/drops?segment=${seg}`; };
-  const head = h("section", { class: "panel" }, ...banners(findings, st), sentence, lastDrop(drops, st),
+  let lastNode = lastDrop(drops, st);
+  const head = h("section", { class: "panel" }, ...banners(findings, st), sentence, lastNode,
     pathDiagram(hops(st, roughSegs), { onPick: picked, vertical }));
+  const swapLast = (s) => { const n = lastDrop(drops, s); lastNode.replaceWith(n); lastNode = n; };
 
   const rangeRow = h("div", { class: "ranges", role: "group", "aria-label": t("range.1h") },
     RANGES.map(([k, s]) => h("button", { type: "button", "aria-pressed": String(s === range),
@@ -102,23 +104,27 @@ export async function mount(main, { refresh }) {
     const a = (anns || []).find(x => startMs(x) <= (e ?? Date.now()) && (endMs(x) ?? startMs(x)) >= s);
     return a ? h("span", { class: "scenetag" }, t(`label.${a.label}`)) : null;
   };
-  const inRange = drops.filter(d => d.start >= from);
-  const recent = h("div", {}, h("h2", {}, t("recent.title")), inRange.length
-    ? h("ul", { class: "drops" }, inRange.slice(0, 8).map(d => h("li", {}, h("a", { href: `#/drop/${d.id}` },
-        h("span", { class: "what" }, [when(d.start), d.point ? null : d.open ? "…" : dur((d.end - d.start) / 1000), d.segs.join(", ") || null]
-          .filter(Boolean).join(", ")), scene(d.start, d.end),   // a point event has no duration
-        h("div", { class: "muted" }, d.label)))))
-    : h("p", { class: "empty" }, t("recent.none")));
-  const roughList = conds.filter(c => c.kind === "loss" || c.kind === "latency" || c.kind === "wifi_lan_loss");
-  const rough = h("div", {}, h("h2", {}, t("rough.title")), roughList.length
-    ? h("ul", { class: "drops" }, roughList.slice(0, 8).map(c => {
-        const d = c.detail_json ? JSON.parse(c.detail_json) : (c.detail || {});
-        const s = startMs(c), e = endMs(c);
-        return h("li", {}, h("div", { class: "what" }, `${when(s)}${e ? ", " + dur((e - s) / 1000) : ""}`, scene(s, e)),
-          h("div", { class: "muted" }, cause(d.label || c.kind)));
-      }))
-    : h("p", { class: "empty" }, t("rough.none")));
-  main.replaceChildren(head, charts, h("section", { class: "panel split" }, recent, rough));
+  const lists = () => {   // rebuilt whenever a drop or patch arrives, so neither list waits for a reload
+    const inRange = drops.filter(d => d.start >= Date.now() - range * 1000);
+    const recent = h("div", {}, h("h2", {}, t("recent.title")), inRange.length
+      ? h("ul", { class: "drops" }, inRange.slice(0, 8).map(d => h("li", {}, h("a", { href: `#/drop/${d.id}` },
+          h("span", { class: "what" }, [when(d.start), d.point ? null : d.open ? "…" : dur((d.end - d.start) / 1000), d.segs.join(", ") || null]
+            .filter(Boolean).join(", ")), scene(d.start, d.end),   // a point event has no duration
+          h("div", { class: "muted" }, d.label)))))
+      : h("p", { class: "empty" }, t("recent.none")));
+    const roughList = conds.filter(c => c.kind === "loss" || c.kind === "latency" || c.kind === "wifi_lan_loss");
+    const rough = h("div", {}, h("h2", {}, t("rough.title")), roughList.length
+      ? h("ul", { class: "drops" }, roughList.slice(0, 8).map(c => {
+          const d = c.detail_json ? JSON.parse(c.detail_json) : (c.detail || {});
+          const s = startMs(c), e = endMs(c);
+          return h("li", {}, h("div", { class: "what" }, `${when(s)}${e ? ", " + dur((e - s) / 1000) : ""}`, scene(s, e)),
+            h("div", { class: "muted" }, cause(d.label || c.kind)));
+        }))
+      : h("p", { class: "empty" }, t("rough.none")));
+    return h("section", { class: "panel split" }, recent, rough);
+  };
+  let listsNode = lists();
+  main.replaceChildren(head, charts, listsNode);
 
   let timer = null;
   const onMsg = (msg) => {
@@ -128,15 +134,25 @@ export async function mount(main, { refresh }) {
       const s2 = await refreshStatus();
       const now = Date.now();
       const [list, c2] = await Promise.all([api(`/api/incidents?from=${now - 30 * 86400000}`), api(`/api/conditions?from=${now - range * 1000}`)]);
-      open = list.map(parseIncident).find(d => d.open && d.segs.length);
+      anns = await api(`/api/annotations?from=${now - range * 1000}&to=${now}`).catch(() => anns);
+      drops = list.map(parseIncident).sort((a, b) => b.start - a.start);
+      conds = c2;
+      open = drops.find(d => d.open && d.segs.length);
       roughNow = c2.find(c => (c.end_ms ?? c.end_s) == null && c.kind === "loss");
       sentence.textContent = statusSentence(s2, open, roughNow);
       const node = pathDiagram(hops(s2, roughSegs), { onPick: picked, vertical });
       head.querySelector(".path")?.replaceWith(node);
+      swapLast(s2);
+      const l2 = lists();
+      listsNode.replaceWith(l2);
+      listsNode = l2;
     }, 800);
   };
   live.listeners.add(onMsg);
-  const tick = setInterval(() => { if (open) sentence.textContent = statusSentence(live.status, open, roughNow); }, 1000);
+  const tick = setInterval(() => {
+    if (open) sentence.textContent = statusSentence(live.status, open, roughNow);
+    if (!drops.some(d => !d.open)) swapLast(live.status || st);   // "Recording for N s" keeps counting
+  }, 1000);
   const redraw = range <= 21600 ? setInterval(async () => {   // new data in place: focus, scroll and toggles stay
     if (document.visibilityState !== "visible") return;
     const t2 = Date.now();

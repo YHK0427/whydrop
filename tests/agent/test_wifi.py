@@ -268,3 +268,37 @@ def test_ssid_never_stored_by_any_path(monkeypatch, tmp_path, caplog):
         data = f.read_bytes()
         assert SSID.encode() not in data and SSID.encode("utf-16-le") not in data, f.name
     assert SSID not in caplog.text
+
+
+def test_wifi_off_on_windows_is_still_watched_after_the_route_goes(monkeypatch, tmp_path):
+    """Turning Wi-Fi off on a Windows laptop removes the default route first. The agent then saw no interface, dropped
+    its Wi-Fi source and never asked netsh again, so the Wi-Fi going down was never recorded and the drop was blamed
+    on the host's network config (R1d) instead of Wi-Fi (R1a)."""
+    from whydrop.agent import run as runmod
+    from whydrop.agent.config import load_config
+    from whydrop.agent.env import EnvInfo
+    answers = iter([NETSH_EN, NETSH_EN.replace("connected", "disconnected")])
+
+    async def fake_run(*args, **k):
+        return next(answers)
+    monkeypatch.setattr(wifi, "_run", fake_run)
+    monkeypatch.setattr(runmod.sys, "platform", "win32")
+
+    async def main():
+        cfg = load_config(None, {"WHYDROP_DB_PATH": str(tmp_path / "w.db")})
+        a = runmod.Agent(cfg, asyncio.Event())
+        await a.store.open()
+        a.agg = runmod.Aggregator(a.store, a.now)
+        a.findings = runmod.FindingsTracker(a.targets, a.now)
+        a.wifi_tracker = WifiTracker(b"salt", a.now)
+        a.env = EnvInfo("192.168.0.6", "192.168.0.1", "wifi", (), False, False)
+        a._rot["link"] = 0
+        await a.job_link_layer()
+        a.env = EnvInfo(None, None, "unknown", (), False, False)   # Wi-Fi off: no route, no interface
+        a._rot["link"] = 0
+        await a.job_link_layer()
+        await a.store.flush()
+        kinds = [r[0] for r in await a.store.execute("select kind from events")]
+        await a.store.close()
+        return kinds
+    assert "reassoc" in asyncio.run(main())

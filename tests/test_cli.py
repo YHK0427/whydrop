@@ -153,3 +153,17 @@ def test_replay_write_rewrites_stale_verdicts_after_a_backup(tmp_path, capsys):
     assert "1 rewritten" in out and "not a drop now" in out and "point event" in out and "no 1 s data" in out
     assert str(backup.name) in out
     assert main(["replay", str(db), "--write", "--set", "LINE_LOOKBACK_S=9"]) == 2   # never write tuned verdicts
+
+
+def test_a_closed_browser_socket_is_not_logged_as_an_error():
+    """Windows printed a ConnectionResetError traceback in the agent's terminal whenever a dashboard tab closed."""
+    import asyncio
+
+    from whydrop.cli import quiet_resets
+    loop = asyncio.new_event_loop()
+    seen = []
+    loop.default_exception_handler = lambda ctx: seen.append(ctx)
+    quiet_resets(loop, {"message": "x", "exception": ConnectionResetError(10054, "reset")})
+    quiet_resets(loop, {"message": "y", "exception": ValueError("real")})
+    loop.close()
+    assert [c["message"] for c in seen] == ["y"]
