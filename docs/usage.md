@@ -165,7 +165,7 @@ $env:WHYDROP_SECRET = Get-Content $env:TEMP\whydrop-secret
 .venv\Scripts\whydrop reflector --host 127.0.0.1
 ```
 
-It prints `whydrop reflector 0.6.2 listening udp :48100 tcp :48100`.
+It prints `whydrop reflector … listening udp :48100 tcp :48100`.
 
 **Terminal 2 — the agent in precision mode**:
 

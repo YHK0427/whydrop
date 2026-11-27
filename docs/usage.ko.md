@@ -165,7 +165,7 @@ $env:WHYDROP_SECRET = Get-Content $env:TEMP\whydrop-secret
 .venv\Scripts\whydrop reflector --host 127.0.0.1
 ```
 
-`whydrop reflector 0.6.2 listening udp :48100 tcp :48100`이 나와요.
+`whydrop reflector … listening udp :48100 tcp :48100`이 나와요.
 
 **터미널 2 — 정밀 모드 agent**:
 
